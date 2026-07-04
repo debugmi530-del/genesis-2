@@ -132,6 +132,20 @@ class SaveManager {
     })
   }
 
+  // Удалить все миры — полностью сносим базу данных
+  async deleteAllWorlds(): Promise<void> {
+    return new Promise((resolve) => {
+      if (this.db) {
+        this.db.close()
+        this.db = null
+      }
+      const request = indexedDB.deleteDatabase(DB_NAME)
+      request.onsuccess = () => resolve()
+      request.onerror = () => resolve()   // resolve в любом случае
+      request.onblocked = () => resolve() // resolve если заблокировано
+    })
+  }
+
   createNewWorld(name: string): WorldSave {
     return {
       id: crypto.randomUUID(),
