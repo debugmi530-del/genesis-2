@@ -33,40 +33,61 @@ interface WebLLMEngine {
 
 const SYSTEM_PROMPT = `Ты — Genesis, живой творец миров. Ты создаёшь, изменяешь и развиваешь симуляцию живого 3D-мира от первого лица.
 
-Твои инструменты:
-- spawn_entity: создать существо с уникальным поведением
-- evolve_entity: изменить существующее существо (мутация, рост)
-- remove_entity: убрать существо (смерть, исчезновение)
-- add_mechanic: добавить новую игровую механику
-- modify_terrain: изменить рельеф (горы, пещеры, реки)
-- add_weather: добавить погодное явление
-- spawn_structure: создать структуру (руины, гнездо, алтарь)
-- start_event: запустить событие в мире
-- player_ability: дать игроку способность на основе его поведения
-- world_message: отправить сообщение игроку от лица мира
+Твои инструменты (выбирай ОДИН за раз):
+
+spawn_entity — создать существо:
+  { "action": "spawn_entity", "entity": { "name": "...", "type": "...", "color": "#rrggbb", "size": 1.0, "behavior": "...", "position": [x, 0, z] } }
+
+evolve_entity — мутировать существо (entityId из списка существ):
+  { "action": "evolve_entity", "entityId": "...", "changes": { "color": "#rrggbb", "size": 1.5, "behavior": "..." } }
+
+remove_entity — убрать существо:
+  { "action": "remove_entity", "entityId": "..." }
+
+add_mechanic — добавить механику:
+  { "action": "add_mechanic", "mechanic": { "name": "...", "description": "...", "trigger": "..." } }
+
+modify_terrain — изменить рельеф:
+  { "action": "modify_terrain", "modification": { "type": "mountain|cave|river|anomaly", "position": [x, z], "radius": 50, "strength": 1.5 } }
+
+add_weather — изменить погоду:
+  { "action": "add_weather", "weather": "rain|storm|snow|fog|clear", "intensity": 1.0, "duration": 300 }
+
+spawn_structure — создать структуру в мире (рендерится 3D):
+  { "action": "spawn_structure", "name": "...", "type": "tree|ancient_tree|ruin|altar|nest|crystal|monolith", "position": [x, 0, z], "description": "..." }
+
+start_event — запустить событие:
+  { "action": "start_event", "name": "...", "description": "...", "effect": "..." }
+
+player_ability — дать игроку способность:
+  { "action": "player_ability", "ability": "...", "description": "..." }
+
+world_message — послание мира игроку:
+  { "action": "world_message", "message": "..." }
 
 ПРАВИЛА:
-1. Всегда возвращай JSON с полем "action" и соответствующими данными
-2. Существа должны иметь уникальные имена, цвета (#rrggbb), поведение
-3. Учитывай баланс экосистемы (хищники/жертвы, болезни, конкуренция)
-4. Реагируй на действия игрока — давай способности за поведение
-5. Добавляй лор и историю через world_message
-6. Экосистема должна усложняться со временем
-
-Отвечай ТОЛЬКО валидным JSON объектом, без лишнего текста.`
+1. Возвращай ТОЛЬКО один JSON-объект без пояснений
+2. Существа: уникальные имена, цвета (#rrggbb), интересное поведение
+3. Учитывай баланс экосистемы (хищники/жертвы, конкуренция, болезни)
+4. Используй spawn_structure для деревьев, руин, алтарей — они рендерятся в 3D
+5. modify_terrain создаёт горы/пещеры/реки на карте
+6. Реагируй на количество существ и события мира
+7. Экосистема должна усложняться со временем`
 
 const MODEL_ID = 'Phi-3.5-mini-instruct-q4f16_1-MLC'
+const MODEL_SIZE_BYTES = 2.2 * 1024 * 1024 * 1024 // ~2.2 GB
 
 export class GenesisAI {
   private engine: WebLLMEngine | null = null
   private isInitialized = false
   private isGenerating = false
   lastInitError: AIInitError | null = null
+  lastRawError: string | null = null
 
   async initialize(
     onProgress: (progress: number, message: string) => void
   ): Promise<void> {
-    // Step 1: check WebGPU availability before downloading anything
+    // 1. Проверка WebGPU
     if (typeof navigator === 'undefined' || !navigator.gpu) {
       this.lastInitError = 'webgpu_not_supported'
       throw new Error('webgpu_not_supported')
@@ -79,33 +100,74 @@ export class GenesisAI {
       throw new Error('webgpu_no_adapter')
     }
 
-    // Step 2: load WebLLM and start model download
-    // initProgressCallback must be passed to CreateMLCEngine, not to reload()
-    onProgress(0, 'Инициализация движка...')
+    // 2. Проверка места на диске (Cache API)
+    if ('storage' in navigator && 'estimate' in navigator.storage) {
+      try {
+        const { quota = 0, usage = 0 } = await navigator.storage.estimate()
+        const available = quota - usage
+        const availableMB = Math.round(available / 1024 / 1024)
+        if (available > 0 && available < MODEL_SIZE_BYTES) {
+          onProgress(0,
+            `Внимание: мало места (${availableMB} МБ свободно, нужно ~2200 МБ). ` +
+            `Очистите кэш браузера или освободите место на диске.`
+          )
+          // Не бросаем ошибку — пробуем загрузить, вдруг браузер занижает estimate
+          await new Promise(r => setTimeout(r, 3000))
+        }
+      } catch (_) {
+        // storage.estimate недоступен — продолжаем без проверки
+      }
+    }
+
+    // 3. Загрузка WebLLM и модели
+    onProgress(0, 'Инициализация движка ИИ...')
     try {
       const webllm = await import('@mlc-ai/web-llm')
       let highWaterMark = 0
+
       this.engine = await webllm.CreateMLCEngine(MODEL_ID, {
         initProgressCallback: (p: { progress: number; text: string }) => {
-          // прогресс только вперёд — никогда не откатывается назад
           const pct = Math.round(p.progress * 100)
           if (pct > highWaterMark) highWaterMark = pct
           onProgress(highWaterMark, p.text)
         },
       }) as WebLLMEngine
+
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e)
-      if (
+      const msg  = e instanceof Error ? e.message : String(e)
+      const name = e instanceof Error ? e.name   : ''
+      const full = `[${name}] ${msg}`
+
+      // Логируем полную информацию об ошибке
+      console.error('GenesisAI init error:', {
+        message: msg,
+        name,
+        type: e instanceof DOMException ? 'DOMException' : typeof e,
+        raw: e,
+      })
+
+      this.lastRawError = full
+
+      const isCache =
+        name === 'QuotaExceededError' ||
         msg.includes('QuotaExceeded') ||
         msg.includes('quota') ||
-        msg.includes('storage') ||
         msg.toLowerCase().includes('cache') ||
-        msg.includes('QUOTA_BYTES')
-      ) {
+        msg.includes('QUOTA_BYTES') ||
+        msg.includes('storage') ||
+        msg.includes('put') // Cache API put() errors
+      const isNetwork =
+        msg.includes('fetch') ||
+        msg.includes('network') ||
+        msg.includes('ERR_') ||
+        msg.includes('Failed to load') ||
+        msg.includes('NetworkError')
+
+      if (isCache) {
         this.lastInitError = 'cache_error'
         throw new Error('cache_error')
       }
-      if (msg.includes('fetch') || msg.includes('network') || msg.includes('ERR_') || msg.includes('load')) {
+      if (isNetwork) {
         this.lastInitError = 'network_error'
         throw new Error('network_error')
       }
@@ -115,29 +177,25 @@ export class GenesisAI {
 
     this.isInitialized = true
     this.lastInitError = null
+    this.lastRawError = null
   }
 
-  // Сбросить состояние движка (перед повторной инициализацией)
   reset(): void {
     this.engine = null
     this.isInitialized = false
     this.isGenerating = false
     this.lastInitError = null
+    this.lastRawError = null
   }
 
-  // Удалить кэш нейросети из браузера (Cache API + IndexedDB WebLLM)
   static async clearCache(): Promise<void> {
-    // Удаляем все кэши Cache API на этом origin (WebLLM хранит веса модели здесь)
     if ('caches' in window) {
       try {
         const keys = await caches.keys()
         await Promise.all(keys.map(key => caches.delete(key)))
-      } catch (_) {
-        // игнорируем — продолжаем
-      }
+      } catch (_) {}
     }
 
-    // Удаляем IndexedDB базы WebLLM/MLC если они есть
     try {
       if (indexedDB.databases) {
         const dbs = await indexedDB.databases()
@@ -150,16 +208,12 @@ export class GenesisAI {
           ) {
             await new Promise<void>((resolve) => {
               const req = indexedDB.deleteDatabase(db.name!)
-              req.onsuccess = () => resolve()
-              req.onerror = () => resolve()
-              req.onblocked = () => resolve()
+              req.onsuccess = req.onerror = req.onblocked = () => resolve()
             })
           }
         }
       }
-    } catch (_) {
-      // не все браузеры поддерживают indexedDB.databases()
-    }
+    } catch (_) {}
   }
 
   async generateCommand(worldState: WorldState, playerAction?: string): Promise<AICommand | null> {
@@ -167,12 +221,10 @@ export class GenesisAI {
     this.isGenerating = true
 
     try {
-      const stateDescription = this.describeState(worldState, playerAction)
-
       const response = await this.engine.chat.completions.create({
         messages: [
           { role: 'system', content: SYSTEM_PROMPT },
-          { role: 'user', content: stateDescription },
+          { role: 'user',   content: this.describeState(worldState, playerAction) },
         ],
         max_tokens: 512,
         temperature: 0.85,
@@ -184,8 +236,7 @@ export class GenesisAI {
       const jsonMatch = content.match(/\{[\s\S]*\}/)
       if (!jsonMatch) return null
 
-      const command = JSON.parse(jsonMatch[0]) as AICommand
-      return command
+      return JSON.parse(jsonMatch[0]) as AICommand
     } catch (e) {
       console.warn('AI generation error:', e)
       return null
@@ -197,24 +248,23 @@ export class GenesisAI {
   private describeState(state: WorldState, playerAction?: string): string {
     const entityList = state.entities
       .slice(-10)
-      .map((e) => `${e.name} (${e.type}, поколение ${e.generation ?? 1}, faction: ${e.faction ?? 'нет'})`)
-      .join(', ')
+      .map((e) => `${e.name} (id: ${e.id}, тип: ${e.type}, поколение ${e.generation ?? 1})`)
+      .join('\n')
 
-    const mechanics = state.mechanics.map((m) => m.name).join(', ')
-    const recentEvents = state.eventLog
-      .slice(0, 5)
-      .map((e) => e.message)
-      .join('; ')
+    const mechanics    = state.mechanics.map((m) => m.name).join(', ')
+    const recentEvents = state.eventLog.slice(0, 5).map((e) => e.message).join('; ')
 
-    return `Поколение мира: ${state.generation}
-Существ в мире: ${state.entities.length} (последние: ${entityList || 'нет'})
-Активные механики: ${mechanics || 'нет'}
+    return `=== СОСТОЯНИЕ МИРА ===
+Поколение: ${state.generation}
+Существ: ${state.entities.length}
+${entityList ? `\nСущества:\n${entityList}` : ''}
+Механики: ${mechanics || 'нет'}
 Последние события: ${recentEvents || 'нет'}
 Способности игрока: ${state.playerAbilities.join(', ') || 'нет'}
 ${playerAction ? `Последнее действие игрока: ${playerAction}` : ''}
-Память ИИ: ${state.aiMemory || 'первый запуск мира'}
+Память ИИ: ${state.aiMemory || 'первый запуск'}
 
-Что ты добавишь в мир сейчас? Учитывай баланс экосистемы. Верни один JSON-объект.`
+Что ты сделаешь с миром сейчас? Один JSON-объект.`
   }
 
   get ready() {
