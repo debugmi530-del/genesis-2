@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { saveManager, type WorldSave } from '../store/saveManager'
 import { genesisAI, GenesisAI } from '../ai/GenesisAI'
 import { useGameStore } from '../store/gameStore'
@@ -19,6 +19,13 @@ function formatDate(ts: number): string {
   return new Date(ts).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
+function formatElapsed(seconds: number): string {
+  const m = Math.floor(seconds / 60)
+  const s = seconds % 60
+  if (m > 0) return `${m} мин ${s} сек`
+  return `${s} сек`
+}
+
 export default function MainMenu({ onEnterWorld }: Props) {
   const [worlds, setWorlds] = useState<WorldSave[]>([])
   const [loading, setLoading] = useState(true)
@@ -31,6 +38,13 @@ export default function MainMenu({ onEnterWorld }: Props) {
   const [resettingAI, setResettingAI] = useState(false)
   const [confirmFullReset, setConfirmFullReset] = useState(false)
   const [fullResetting, setFullResetting] = useState(false)
+
+  // таймер загрузки
+  const [elapsedSeconds, setElapsedSeconds] = useState(0)
+  const downloadStartRef = useRef<number | null>(null)
+  const elapsedTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const progressRef = useRef(0)
+
   const { setCurrentWorld, setAiReady } = useGameStore()
 
   const stars = useMemo(
@@ -47,7 +61,40 @@ export default function MainMenu({ onEnterWorld }: Props) {
   useEffect(() => {
     loadWorlds()
     initAI()
+    return () => stopTimer()
   }, [])
+
+  function startTimer() {
+    if (elapsedTimerRef.current) return
+    downloadStartRef.current = Date.now()
+    setElapsedSeconds(0)
+    elapsedTimerRef.current = setInterval(() => {
+      setElapsedSeconds(Math.floor((Date.now() - downloadStartRef.current!) / 1000))
+    }, 1000)
+  }
+
+  function stopTimer() {
+    if (elapsedTimerRef.current) {
+      clearInterval(elapsedTimerRef.current)
+      elapsedTimerRef.current = null
+    }
+    downloadStartRef.current = null
+    setElapsedSeconds(0)
+  }
+
+  // Оценка оставшегося времени на основе скорости прогресса
+  function getETA(): string | null {
+    if (progressRef.current < 2 || elapsedSeconds < 3) return null
+    const rate = progressRef.current / elapsedSeconds // % в секунду
+    if (rate <= 0) return null
+    const remaining = Math.round((100 - progressRef.current) / rate)
+    if (remaining <= 0) return null
+    const m = Math.floor(remaining / 60)
+    const s = remaining % 60
+    if (m >= 60) return `~${Math.floor(m / 60)} ч ${m % 60} мин`
+    if (m > 0) return `~${m} мин ${s} сек`
+    return `~${s} сек`
+  }
 
   async function loadWorlds() {
     setLoading(true)
@@ -60,20 +107,25 @@ export default function MainMenu({ onEnterWorld }: Props) {
     setAiStatus('loading')
     setAiProgress(0)
     setAiMessage('')
+    progressRef.current = 0
+    stopTimer()
+    startTimer()
     try {
       await genesisAI.initialize((progress, message) => {
+        progressRef.current = progress
         setAiProgress(progress)
         setAiMessage(message)
       })
+      stopTimer()
       setAiStatus('ready')
       setAiReady(true)
     } catch (e) {
       console.error('AI init failed:', e)
+      stopTimer()
       setAiStatus('error')
     }
   }
 
-  // Удалить кэш нейросети и перескачать заново
   async function handleResetAI() {
     setResettingAI(true)
     try {
@@ -86,7 +138,6 @@ export default function MainMenu({ onEnterWorld }: Props) {
     initAI()
   }
 
-  // Полный сброс: удалить все миры + нейросеть, перезагрузить страницу
   async function handleFullReset() {
     setFullResetting(true)
     try {
@@ -131,6 +182,7 @@ export default function MainMenu({ onEnterWorld }: Props) {
   }
 
   const canCreate = worlds.length < 20
+  const eta = getETA()
 
   return (
     <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center relative overflow-hidden">
@@ -168,18 +220,48 @@ export default function MainMenu({ onEnterWorld }: Props) {
             }`}
           />
           <div className="flex-1 min-w-0">
+
             {aiStatus === 'loading' && (
               <>
-                <div className="text-xs text-zinc-400 mb-1 truncate">{aiMessage || 'Загрузка ИИ-модели...'}</div>
-                <div className="w-full h-1 bg-zinc-800 rounded-full overflow-hidden">
+                {/* Текст текущей операции с анимированными точками */}
+                <div className="flex items-center gap-1.5 mb-1.5">
+                  <span className="text-xs text-zinc-300 truncate">
+                    {aiMessage || 'Загрузка ИИ-модели...'}
+                  </span>
+                  <LoadingDots />
+                </div>
+
+                {/* Прогресс-бар */}
+                <div className="w-full h-1.5 bg-zinc-800 rounded-full overflow-hidden mb-1.5">
                   <div
-                    className="h-full bg-emerald-500 transition-all duration-300 rounded-full"
-                    style={{ width: `${aiProgress}%` }}
+                    className="h-full bg-gradient-to-r from-emerald-600 to-emerald-400 transition-all duration-500 rounded-full"
+                    style={{ width: `${Math.max(aiProgress, 0.5)}%` }}
                   />
                 </div>
-                <div className="text-xs text-zinc-600 mt-1">{aiProgress}% · Первый запуск может занять несколько минут</div>
+
+                {/* Нижняя строка: прогресс + таймер + ETA */}
+                <div className="flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-3 text-zinc-500">
+                    <span className="text-zinc-300 font-mono">{aiProgress}%</span>
+                    {elapsedSeconds > 0 && (
+                      <span className="text-zinc-600">
+                        прошло {formatElapsed(elapsedSeconds)}
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-zinc-500 text-right">
+                    {eta ? (
+                      <span className="text-zinc-400">осталось {eta}</span>
+                    ) : elapsedSeconds > 5 ? (
+                      <span className="text-zinc-700">оцениваем время...</span>
+                    ) : (
+                      <span className="text-zinc-700">Первый запуск: несколько минут</span>
+                    )}
+                  </div>
+                </div>
               </>
             )}
+
             {aiStatus === 'ready' && (
               <div className="flex items-center justify-between gap-3 flex-wrap">
                 <div className="text-xs text-emerald-400">ИИ готов — Genesis может думать</div>
@@ -192,6 +274,7 @@ export default function MainMenu({ onEnterWorld }: Props) {
                 </button>
               </div>
             )}
+
             {aiStatus === 'error' && (
               <div className="flex flex-col gap-2">
                 <div className="text-xs text-red-400">{getAiErrorText()}</div>
@@ -212,6 +295,7 @@ export default function MainMenu({ onEnterWorld }: Props) {
                 </div>
               </div>
             )}
+
             {aiStatus === 'idle' && (
               <div className="text-xs text-zinc-500">Инициализация...</div>
             )}
@@ -354,5 +438,29 @@ export default function MainMenu({ onEnterWorld }: Props) {
         </div>
       )}
     </div>
+  )
+}
+
+// Анимированные точки — показывают что загрузка идёт активно
+function LoadingDots() {
+  return (
+    <span className="inline-flex gap-[3px] items-center flex-shrink-0">
+      {[0, 1, 2].map((i) => (
+        <span
+          key={i}
+          className="block w-[3px] h-[3px] rounded-full bg-zinc-500"
+          style={{
+            animation: 'dotPulse 1.4s ease-in-out infinite',
+            animationDelay: `${i * 0.2}s`,
+          }}
+        />
+      ))}
+      <style>{`
+        @keyframes dotPulse {
+          0%, 80%, 100% { opacity: 0.2; transform: scale(0.8); }
+          40% { opacity: 1; transform: scale(1); }
+        }
+      `}</style>
+    </span>
   )
 }
