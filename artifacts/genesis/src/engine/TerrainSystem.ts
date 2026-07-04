@@ -1,6 +1,7 @@
 import * as THREE from 'three'
+import type { TerrainModification } from '../store/saveManager'
 
-// --- Value noise с плавной интерполяцией ---
+// ─── Value Noise + FBM ───────────────────────────────────────────────────────
 
 function hash2(x: number, z: number, seed: number): number {
   const n = Math.sin(x * 127.1 + z * 311.7 + seed * 74.3) * 43758.5453
@@ -8,66 +9,28 @@ function hash2(x: number, z: number, seed: number): number {
 }
 
 function valueNoise(x: number, z: number, seed: number): number {
-  const ix = Math.floor(x)
-  const iz = Math.floor(z)
-  const fx = x - ix
-  const fz = z - iz
-  // Smooth step (cubic Hermite) — убирает линейные артефакты
+  const ix = Math.floor(x), iz = Math.floor(z)
+  const fx = x - ix, fz = z - iz
   const ux = fx * fx * (3 - 2 * fx)
   const uz = fz * fz * (3 - 2 * fz)
-
   const v00 = hash2(ix,     iz,     seed)
   const v10 = hash2(ix + 1, iz,     seed)
   const v01 = hash2(ix,     iz + 1, seed)
   const v11 = hash2(ix + 1, iz + 1, seed)
-
   return v00 * (1 - ux) * (1 - uz) +
          v10 * ux        * (1 - uz) +
          v01 * (1 - ux)  * uz       +
          v11 * ux        * uz
 }
 
-// Fractional Brownian Motion — складывает октавы шума
 function fbm(x: number, z: number, seed: number, octaves: number): number {
-  let value = 0
-  let amplitude = 0.5
-  let frequency = 1
+  let value = 0, amplitude = 0.5, frequency = 1
   for (let i = 0; i < octaves; i++) {
     value += valueNoise(x * frequency, z * frequency, seed + i * 47.3) * amplitude
     amplitude *= 0.5
     frequency *= 2.0
   }
-  return value // диапазон ≈ [0..1]
-}
-
-// --- Основная функция высоты ---
-
-export function getTerrainHeight(x: number, z: number, seed: number): number {
-  const s = (seed % 10000) + 1
-
-  // Контрольная карта (очень низкая частота) — определяет тип зоны
-  // 0 = равнина, 1 = горы
-  const ctrl = fbm(x * 0.0012 + s * 0.001, z * 0.0012 + s * 0.0013, s, 4)
-
-  // Равнина — слабый fbm, почти плоско, лёгкие неровности
-  const plains = (fbm(x * 0.01, z * 0.01, s + 100, 4) - 0.5) * 4
-
-  // Холмы — средний fbm
-  const hills = (fbm(x * 0.018, z * 0.018, s + 200, 5) - 0.5) * 22
-
-  // Горы — fbm с возведением в степень для острых пиков
-  const mRaw = fbm(x * 0.01, z * 0.01, s + 300, 6)
-  const mountains = Math.pow(Math.max(0, mRaw - 0.2) / 0.8, 1.8) * 70
-
-  // Плавное смешивание через контрольную карту
-  // 0.0..0.45 → равнина→холмы
-  // 0.45..0.65 → холмы
-  // 0.65..1.0  → холмы→горы
-  const tPlainHill = smoothstep(0.0, 0.5, ctrl)
-  const tHillMnt   = smoothstep(0.6, 1.0, ctrl)
-
-  const h = lerp(lerp(plains, hills, tPlainHill), mountains, tHillMnt)
-  return h
+  return value
 }
 
 function smoothstep(edge0: number, edge1: number, x: number): number {
@@ -79,7 +42,87 @@ function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t
 }
 
-// --- Создание меша ---
+// ─── Terrain modifications (применяются поверх базового шума) ────────────────
+
+const activeMods: TerrainModification[] = []
+
+export function addTerrainMod(mod: TerrainModification): void {
+  activeMods.push(mod)
+}
+
+export function clearTerrainMods(): void {
+  activeMods.length = 0
+}
+
+function getModHeight(x: number, z: number): number {
+  if (activeMods.length === 0) return 0
+  let extra = 0
+  for (const mod of activeMods) {
+    const dx = x - mod.position[0]
+    const dz = z - mod.position[1]
+    const dist2 = dx * dx + dz * dz
+    const r2 = mod.radius * mod.radius
+    if (dist2 < r2 * 4) {
+      const falloff = Math.exp(-dist2 / (2 * r2))
+      switch (mod.type) {
+        case 'mountain': extra += mod.strength * falloff * 18; break
+        case 'cave':     extra -= mod.strength * falloff * 6;  break
+        case 'river':    extra -= mod.strength * falloff * 4;  break
+        case 'anomaly':
+          extra += mod.strength * falloff * 12 * Math.sin(Math.sqrt(dist2) * 0.4)
+          break
+      }
+    }
+  }
+  return extra
+}
+
+// ─── Высота рельефа ──────────────────────────────────────────────────────────
+
+export function getTerrainHeight(x: number, z: number, seed: number): number {
+  const s = (seed % 10000) + 1
+  const ctrl = fbm(x * 0.0012 + s * 0.001, z * 0.0012 + s * 0.0013, s, 4)
+  const plains    = (fbm(x * 0.01,  z * 0.01,  s + 100, 4) - 0.5) * 4
+  const hills     = (fbm(x * 0.018, z * 0.018, s + 200, 5) - 0.5) * 22
+  const mRaw      = fbm(x * 0.01,   z * 0.01,  s + 300, 6)
+  const mountains = Math.pow(Math.max(0, mRaw - 0.2) / 0.8, 1.8) * 70
+  const tPlainHill = smoothstep(0.0, 0.5, ctrl)
+  const tHillMnt   = smoothstep(0.6, 1.0, ctrl)
+  const base = lerp(lerp(plains, hills, tPlainHill), mountains, tHillMnt)
+  return base + getModHeight(x, z)
+}
+
+// ─── Rebuild mesh после модификаций ─────────────────────────────────────────
+
+export function rebuildTerrainMesh(mesh: THREE.Mesh, seed: number): void {
+  const geo = mesh.geometry as THREE.BufferGeometry
+  const positions = geo.attributes.position as THREE.BufferAttribute
+  const colors    = geo.attributes.color    as THREE.BufferAttribute
+  const color = new THREE.Color()
+
+  for (let i = 0; i < positions.count; i++) {
+    const x = positions.getX(i)
+    const z = positions.getZ(i)
+    const h = getTerrainHeight(x, z, seed)
+    positions.setY(i, h)
+
+    if (colors) {
+      if      (h < -2)  color.setHex(0x3a6b8a)
+      else if (h < 3)   color.setHex(0x4a8c35)
+      else if (h < 12)  color.setHex(0x5a7a40)
+      else if (h < 25)  color.setHex(0x7a6a52)
+      else              color.setHex(0xd0cfc8)
+      colors[i * 3]     = color.r
+      colors[i * 3 + 1] = color.g
+      colors[i * 3 + 2] = color.b
+    }
+  }
+  positions.needsUpdate = true
+  if (colors) colors.needsUpdate = true
+  geo.computeVertexNormals()
+}
+
+// ─── Создание меша terrain ───────────────────────────────────────────────────
 
 export function createTerrain(seed: number, size = 4000, segments = 400): THREE.Mesh {
   const geometry = new THREE.PlaneGeometry(size, size, segments, segments)
@@ -87,65 +130,169 @@ export function createTerrain(seed: number, size = 4000, segments = 400): THREE.
 
   const positions = geometry.attributes.position as THREE.BufferAttribute
   for (let i = 0; i < positions.count; i++) {
-    const x = positions.getX(i)
-    const z = positions.getZ(i)
-    positions.setY(i, getTerrainHeight(x, z, seed))
+    positions.setY(i, getTerrainHeight(positions.getX(i), positions.getZ(i), seed))
   }
   positions.needsUpdate = true
   geometry.computeVertexNormals()
 
-  // Vertex colors: окрашиваем по высоте (вода → трава → камень → снег)
   const colors = new Float32Array(positions.count * 3)
-  const color = new THREE.Color()
+  const color  = new THREE.Color()
   for (let i = 0; i < positions.count; i++) {
     const h = positions.getY(i)
-    if (h < -2) {
-      color.setHex(0x3a6b8a)         // вода/болото
-    } else if (h < 3) {
-      color.setHex(0x4a8c35)         // трава
-    } else if (h < 12) {
-      color.setHex(0x5a7a40)         // высокая трава / кустарник
-    } else if (h < 25) {
-      color.setHex(0x7a6a52)         // камень / скала
-    } else {
-      color.setHex(0xd0cfc8)         // снег на вершинах
-    }
+    if      (h < -2)  color.setHex(0x3a6b8a)
+    else if (h < 3)   color.setHex(0x4a8c35)
+    else if (h < 12)  color.setHex(0x5a7a40)
+    else if (h < 25)  color.setHex(0x7a6a52)
+    else              color.setHex(0xd0cfc8)
     colors[i * 3]     = color.r
     colors[i * 3 + 1] = color.g
     colors[i * 3 + 2] = color.b
   }
   geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3))
 
-  const material = new THREE.MeshLambertMaterial({
-    vertexColors: true,
-    side: THREE.FrontSide,
-  })
-
-  const mesh = new THREE.Mesh(geometry, material)
+  const mesh = new THREE.Mesh(
+    geometry,
+    new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.FrontSide })
+  )
   mesh.receiveShadow = true
   mesh.name = 'terrain'
   return mesh
 }
 
+// ─── 3D структуры ────────────────────────────────────────────────────────────
+
+export function createStructureMesh(type: string): THREE.Group {
+  const group = new THREE.Group()
+  const t = type.toLowerCase()
+
+  if (t.includes('tree') || t.includes('дерев') || t.includes('лес')) {
+    const trunkMat = new THREE.MeshLambertMaterial({ color: 0x4a3728 })
+    const crownMat = new THREE.MeshLambertMaterial({ color: 0x2d7a1e })
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.5, 4, 7), trunkMat)
+    trunk.position.y = 2
+    trunk.castShadow = true
+    const crown = new THREE.Mesh(new THREE.SphereGeometry(2.8, 8, 6), crownMat)
+    crown.position.y = 6
+    crown.castShadow = true
+    group.add(trunk, crown)
+
+  } else if (t.includes('ancient') || t.includes('древн') || t.includes('старый')) {
+    const trunkMat = new THREE.MeshLambertMaterial({ color: 0x2a1a0e })
+    const crownMat = new THREE.MeshLambertMaterial({ color: 0x1a4a0e })
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 1.0, 8, 7), trunkMat)
+    trunk.position.y = 4
+    trunk.castShadow = true
+    const crown = new THREE.Mesh(new THREE.SphereGeometry(5, 8, 6), crownMat)
+    crown.position.y = 11
+    crown.scale.y = 0.7
+    crown.castShadow = true
+    group.add(trunk, crown)
+
+  } else if (t.includes('ruin') || t.includes('руин') || t.includes('разруш')) {
+    const mat = new THREE.MeshLambertMaterial({ color: 0x888070 })
+    const walls: [number, number, number, number, number, number][] = [
+      [6, 3, 0.7, 0,    1.5, -3.3],
+      [0.7, 4, 5, 3.3,  2,   0   ],
+      [3, 1.5, 0.7, -1.5, 0.75, 3.3],
+    ]
+    for (const [w, h, d, x, y, z] of walls) {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat)
+      m.position.set(x, y, z)
+      m.rotation.y = (Math.random() - 0.5) * 0.15
+      m.castShadow = true
+      group.add(m)
+    }
+    // рассыпанные камни
+    const smallMat = new THREE.MeshLambertMaterial({ color: 0x777066 })
+    for (let i = 0; i < 5; i++) {
+      const s = 0.3 + Math.random() * 0.7
+      const sm = new THREE.Mesh(new THREE.DodecahedronGeometry(s, 0), smallMat)
+      sm.position.set((Math.random()-0.5)*5, s*0.5, (Math.random()-0.5)*5)
+      sm.rotation.set(Math.random(), Math.random(), Math.random())
+      group.add(sm)
+    }
+
+  } else if (t.includes('altar') || t.includes('алтар')) {
+    const stoneMat = new THREE.MeshLambertMaterial({ color: 0x445566 })
+    const plat = new THREE.Mesh(new THREE.BoxGeometry(5, 0.6, 5), stoneMat)
+    plat.position.y = 0.3
+    plat.castShadow = true
+    const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.45, 3.5, 8), stoneMat)
+    pillar.position.y = 2.05
+    pillar.castShadow = true
+    const orbMat = new THREE.MeshBasicMaterial({ color: 0x88aaff })
+    const orb = new THREE.Mesh(new THREE.SphereGeometry(0.55, 10, 10), orbMat)
+    orb.position.y = 4.1
+    const light = new THREE.PointLight(0x6688ff, 2, 25)
+    light.position.y = 4.1
+    group.add(plat, pillar, orb, light)
+
+  } else if (t.includes('nest') || t.includes('гнездо')) {
+    const logMat = new THREE.MeshLambertMaterial({ color: 0x5a3a20 })
+    for (let i = 0; i < 7; i++) {
+      const angle = (i / 7) * Math.PI * 2
+      const log = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.25, 3, 6), logMat)
+      log.position.set(Math.cos(angle) * 1.8, 0.5, Math.sin(angle) * 1.8)
+      log.rotation.z = Math.PI * 0.35
+      log.rotation.y = angle + Math.PI / 2
+      log.castShadow = true
+      group.add(log)
+    }
+
+  } else if (t.includes('crystal') || t.includes('кристалл')) {
+    const colors = [0x88ffcc, 0xaaffee, 0x66ddff]
+    for (let i = 0; i < 3; i++) {
+      const mat = new THREE.MeshLambertMaterial({ color: colors[i], transparent: true, opacity: 0.85 })
+      const h = 2 + i * 1.2
+      const m = new THREE.Mesh(new THREE.ConeGeometry(0.4 - i * 0.1, h, 6), mat)
+      m.position.set((i - 1) * 1.1, h / 2, (i % 2) * 0.6)
+      m.rotation.x = (Math.random() - 0.5) * 0.3
+      group.add(m)
+    }
+    const light = new THREE.PointLight(0x44ffcc, 1.5, 18)
+    light.position.y = 3
+    group.add(light)
+
+  } else if (t.includes('monolith') || t.includes('монолит') || t.includes('stone') || t.includes('камен')) {
+    const mat = new THREE.MeshLambertMaterial({ color: 0x666055 })
+    const m = new THREE.Mesh(new THREE.BoxGeometry(1.5, 6, 0.8), mat)
+    m.position.y = 3
+    m.rotation.y = (Math.random() - 0.5) * 0.3
+    m.castShadow = true
+    group.add(m)
+
+  } else {
+    // default — каменная башня
+    const mat = new THREE.MeshLambertMaterial({ color: 0x777070 })
+    const base = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 1.8, 5, 8), mat)
+    base.position.y = 2.5
+    base.castShadow = true
+    const top = new THREE.Mesh(new THREE.ConeGeometry(1.6, 1.5, 8), new THREE.MeshLambertMaterial({ color: 0x554444 }))
+    top.position.y = 6
+    top.castShadow = true
+    group.add(base, top)
+  }
+
+  return group
+}
+
+// ─── Небо и освещение ────────────────────────────────────────────────────────
+
 export function createSky(scene: THREE.Scene): void {
   scene.background = new THREE.Color(0x87ceeb)
   scene.fog = new THREE.FogExp2(0xc9e8f5, 0.003)
 
-  const ambientLight = new THREE.AmbientLight(0xffffff, 1.2)
-  scene.add(ambientLight)
+  scene.add(new THREE.AmbientLight(0xffffff, 1.2))
 
-  const sunLight = new THREE.DirectionalLight(0xfff4d0, 1.8)
-  sunLight.position.set(80, 120, 60)
-  sunLight.castShadow = true
-  sunLight.shadow.mapSize.set(2048, 2048)
-  sunLight.shadow.camera.near = 0.5
-  sunLight.shadow.camera.far = 500
-  sunLight.shadow.camera.left = -150
-  sunLight.shadow.camera.right = 150
-  sunLight.shadow.camera.top = 150
-  sunLight.shadow.camera.bottom = -150
-  scene.add(sunLight)
+  const sun = new THREE.DirectionalLight(0xfff4d0, 1.8)
+  sun.position.set(80, 120, 60)
+  sun.castShadow = true
+  sun.shadow.mapSize.set(2048, 2048)
+  sun.shadow.camera.near = 0.5
+  sun.shadow.camera.far  = 500
+  sun.shadow.camera.left = sun.shadow.camera.bottom = -150
+  sun.shadow.camera.right = sun.shadow.camera.top   =  150
+  scene.add(sun)
 
-  const hemiLight = new THREE.HemisphereLight(0x87ceeb, 0x4a7c3f, 0.6)
-  scene.add(hemiLight)
+  scene.add(new THREE.HemisphereLight(0x87ceeb, 0x4a7c3f, 0.6))
 }
