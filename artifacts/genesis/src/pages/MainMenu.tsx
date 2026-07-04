@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { saveManager, type WorldSave } from '../store/saveManager'
-import { genesisAI } from '../ai/GenesisAI'
+import { genesisAI, GenesisAI } from '../ai/GenesisAI'
 import { useGameStore } from '../store/gameStore'
 
 interface Props {
@@ -28,6 +28,9 @@ export default function MainMenu({ onEnterWorld }: Props) {
   const [aiStatus, setAiStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
   const [aiProgress, setAiProgress] = useState(0)
   const [aiMessage, setAiMessage] = useState('')
+  const [resettingAI, setResettingAI] = useState(false)
+  const [confirmFullReset, setConfirmFullReset] = useState(false)
+  const [fullResetting, setFullResetting] = useState(false)
   const { setCurrentWorld, setAiReady } = useGameStore()
 
   const stars = useMemo(
@@ -55,6 +58,8 @@ export default function MainMenu({ onEnterWorld }: Props) {
 
   async function initAI() {
     setAiStatus('loading')
+    setAiProgress(0)
+    setAiMessage('')
     try {
       await genesisAI.initialize((progress, message) => {
         setAiProgress(progress)
@@ -68,12 +73,40 @@ export default function MainMenu({ onEnterWorld }: Props) {
     }
   }
 
+  // Удалить кэш нейросети и перескачать заново
+  async function handleResetAI() {
+    setResettingAI(true)
+    try {
+      await GenesisAI.clearCache()
+      genesisAI.reset()
+      setAiReady(false)
+    } finally {
+      setResettingAI(false)
+    }
+    initAI()
+  }
+
+  // Полный сброс: удалить все миры + нейросеть, перезагрузить страницу
+  async function handleFullReset() {
+    setFullResetting(true)
+    try {
+      await GenesisAI.clearCache()
+      genesisAI.reset()
+      await saveManager.deleteAllWorlds()
+    } finally {
+      setFullResetting(false)
+      setConfirmFullReset(false)
+    }
+    window.location.reload()
+  }
+
   function getAiErrorText(): string {
     const err = genesisAI.lastInitError
     if (err === 'webgpu_not_supported') return 'WebGPU недоступен — обновите драйверы видеокарты или запустите игру заново'
     if (err === 'webgpu_no_adapter') return 'Видеокарта не поддерживает WebGPU — нужна DirectX 12 совместимая GPU'
     if (err === 'network_error') return 'Ошибка сети при загрузке модели — проверьте интернет и перезапустите'
-    return 'Ошибка ИИ — перезапустите игру или обновите драйверы видеокарты'
+    if (err === 'cache_error') return 'Ошибка кэша браузера — нажмите «Удалить кэш и перескачать» ниже'
+    return 'Ошибка ИИ — удалите кэш и попробуйте снова'
   }
 
   async function handleNewWorld() {
@@ -125,9 +158,10 @@ export default function MainMenu({ onEnterWorld }: Props) {
           <p className="text-zinc-500 text-sm tracking-widest">мир, который создаёт себя сам</p>
         </div>
 
-        <div className="w-full bg-zinc-900/60 border border-zinc-800 rounded-xl px-4 py-3 flex items-center gap-3">
+        {/* AI статус блок */}
+        <div className="w-full bg-zinc-900/60 border border-zinc-800 rounded-xl px-4 py-3 flex items-start gap-3">
           <div
-            className={`w-2 h-2 rounded-full flex-shrink-0 ${
+            className={`w-2 h-2 rounded-full flex-shrink-0 mt-1 ${
               aiStatus === 'ready' ? 'bg-emerald-400' :
               aiStatus === 'loading' ? 'bg-yellow-400 animate-pulse' :
               aiStatus === 'error' ? 'bg-red-400' : 'bg-zinc-600'
@@ -147,17 +181,35 @@ export default function MainMenu({ onEnterWorld }: Props) {
               </>
             )}
             {aiStatus === 'ready' && (
-              <div className="text-xs text-emerald-400">ИИ готов — Genesis может думать</div>
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div className="text-xs text-emerald-400">ИИ готов — Genesis может думать</div>
+                <button
+                  onClick={handleResetAI}
+                  disabled={resettingAI}
+                  className="text-xs text-zinc-500 hover:text-zinc-300 bg-zinc-800/60 hover:bg-zinc-700/60 border border-zinc-700 rounded px-2 py-1 transition-colors disabled:opacity-40 flex-shrink-0"
+                >
+                  {resettingAI ? 'Удаление...' : '↻ Удалить кэш и перескачать'}
+                </button>
+              </div>
             )}
             {aiStatus === 'error' && (
               <div className="flex flex-col gap-2">
                 <div className="text-xs text-red-400">{getAiErrorText()}</div>
-                <button
-                  onClick={initAI}
-                  className="text-xs text-yellow-300 bg-yellow-900/30 hover:bg-yellow-800/40 border border-yellow-800/50 rounded px-3 py-1.5 transition-colors self-start"
-                >
-                  ↻ Повторить загрузку
-                </button>
+                <div className="flex gap-2 flex-wrap">
+                  <button
+                    onClick={initAI}
+                    className="text-xs text-yellow-300 bg-yellow-900/30 hover:bg-yellow-800/40 border border-yellow-800/50 rounded px-3 py-1.5 transition-colors"
+                  >
+                    ↻ Повторить загрузку
+                  </button>
+                  <button
+                    onClick={handleResetAI}
+                    disabled={resettingAI}
+                    className="text-xs text-orange-300 bg-orange-900/30 hover:bg-orange-800/40 border border-orange-800/50 rounded px-3 py-1.5 transition-colors disabled:opacity-40"
+                  >
+                    {resettingAI ? 'Удаление...' : '🗑 Удалить кэш и перескачать'}
+                  </button>
+                </div>
               </div>
             )}
             {aiStatus === 'idle' && (
@@ -166,6 +218,7 @@ export default function MainMenu({ onEnterWorld }: Props) {
           </div>
         </div>
 
+        {/* Список миров */}
         <div className="w-full">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-zinc-400 text-xs tracking-widest uppercase">Миры</h2>
@@ -263,7 +316,43 @@ export default function MainMenu({ onEnterWorld }: Props) {
         <p className="text-zinc-700 text-xs text-center">
           Нажмите на мир чтобы войти · ИИ начнёт творить через несколько секунд
         </p>
+
+        {/* Полный сброс */}
+        <button
+          onClick={() => setConfirmFullReset(true)}
+          className="text-zinc-700 hover:text-red-500 text-xs transition-colors"
+        >
+          ⚠ Полный сброс (удалить миры и нейросеть)
+        </button>
       </div>
+
+      {/* Диалог подтверждения полного сброса */}
+      {confirmFullReset && (
+        <div className="absolute inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-20">
+          <div className="bg-zinc-900 border border-red-900/60 rounded-xl p-6 w-80 flex flex-col gap-4 mx-4">
+            <div className="text-white text-sm font-medium">Полный сброс</div>
+            <p className="text-zinc-400 text-xs leading-relaxed">
+              Это удалит <span className="text-white">все миры</span> и <span className="text-white">кэш нейросети</span> из браузера. После сброса нейросеть придётся скачать заново.
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={handleFullReset}
+                disabled={fullResetting}
+                className="flex-1 py-2 rounded-lg bg-red-900/60 hover:bg-red-800/60 text-red-300 text-sm transition-colors disabled:opacity-40"
+              >
+                {fullResetting ? 'Удаление...' : 'Удалить всё'}
+              </button>
+              <button
+                onClick={() => setConfirmFullReset(false)}
+                disabled={fullResetting}
+                className="flex-1 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-400 text-sm transition-colors disabled:opacity-40"
+              >
+                Отмена
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
