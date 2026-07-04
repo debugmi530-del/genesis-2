@@ -35,11 +35,11 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: pnpm
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --no-frozen-lockfile
 
       - name: Build Vite renderer
         run: pnpm --filter @workspace/genesis run build:electron
@@ -50,19 +50,19 @@ jobs:
 
       - name: Build Electron (Linux)
         if: matrix.platform == 'linux'
-        run: pnpm --filter @workspace/genesis run electron:build -- --linux
+        run: pnpm --filter @workspace/genesis run electron:build -- --linux --publish never
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build Electron (macOS)
         if: matrix.platform == 'mac'
-        run: pnpm --filter @workspace/genesis run electron:build -- --mac
+        run: pnpm --filter @workspace/genesis run electron:build -- --mac --publish never
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build Electron (Windows)
         if: matrix.platform == 'win'
-        run: pnpm --filter @workspace/genesis run electron:build -- --win
+        run: pnpm --filter @workspace/genesis run electron:build -- --win --publish never
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -75,4 +75,6 @@ jobs:
             artifacts/genesis/dist/electron/*.dmg
             artifacts/genesis/dist/electron/*.AppImage
             artifacts/genesis/dist/electron/*.zip
+            artifacts/genesis/dist/electron/*.nsis.7z
           if-no-files-found: warn
+          retention-days: 30
