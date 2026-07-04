@@ -1,0 +1,78 @@
+name: Build Genesis
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: win
+          - os: macos-latest
+            platform: mac
+          - os: ubuntu-latest
+            platform: linux
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Vite renderer
+        run: pnpm --filter @workspace/genesis run build:electron
+        env:
+          ELECTRON_BUILD: "true"
+          PORT: "3000"
+          BASE_PATH: "./"
+
+      - name: Build Electron (Linux)
+        if: matrix.platform == 'linux'
+        run: pnpm --filter @workspace/genesis run electron:build -- --linux
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build Electron (macOS)
+        if: matrix.platform == 'mac'
+        run: pnpm --filter @workspace/genesis run electron:build -- --mac
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build Electron (Windows)
+        if: matrix.platform == 'win'
+        run: pnpm --filter @workspace/genesis run electron:build -- --win
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: genesis-${{ matrix.platform }}
+          path: |
+            artifacts/genesis/dist/electron/*.exe
+            artifacts/genesis/dist/electron/*.dmg
+            artifacts/genesis/dist/electron/*.AppImage
+            artifacts/genesis/dist/electron/*.zip
+          if-no-files-found: warn

@@ -1,0 +1,48 @@
+appId: com.genesis.game
+productName: Genesis
+copyright: Genesis
+
+directories:
+  output: dist/electron
+  buildResources: build-resources
+
+files:
+  - dist/public/**
+  - electron/**
+  - package.json
+
+extraMetadata:
+  main: electron/main.js
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: build-resources/icon.ico
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  installerIcon: build-resources/icon.ico
+  installerHeaderIcon: build-resources/icon.ico
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Genesis
+
+mac:
+  target:
+    - target: dmg
+      arch: [x64, arm64]
+  icon: build-resources/icon.icns
+  category: public.app-category.games
+
+linux:
+  target:
+    - target: AppImage
+      arch: [x64]
+  icon: build-resources/icon.png
+  category: Game
+
+publish:
+  provider: github
+  releaseType: draft

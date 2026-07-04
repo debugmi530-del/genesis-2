@@ -1,42 +1,32 @@
-import { Switch, Route, Router as WouterRouter } from "wouter";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { Toaster } from "@/components/ui/toaster";
-import { TooltipProvider } from "@/components/ui/tooltip";
-import NotFound from "@/pages/not-found";
+import { useState } from 'react'
+import MainMenu from './pages/MainMenu'
+import GameView from './pages/GameView'
+import type { WorldSave } from './store/saveManager'
 
-const queryClient = new QueryClient();
+type Screen = 'menu' | 'game'
 
-function Home() {
+export default function App() {
+  const [screen, setScreen] = useState<Screen>('menu')
+  const [activeWorld, setActiveWorld] = useState<WorldSave | null>(null)
+
+  function handleEnterWorld(world: WorldSave) {
+    setActiveWorld(world)
+    setScreen('game')
+  }
+
+  function handleExitToMenu() {
+    setActiveWorld(null)
+    setScreen('menu')
+  }
+
   return (
-    <div className="min-h-screen w-full flex items-center justify-center bg-gray-50">
-      <div className="text-center">
-        <h1 className="text-2xl font-bold text-gray-900">Replit Agent is building...</h1>
-        <p className="mt-2 text-sm text-gray-600">Your app will appear here once it's ready.</p>
-      </div>
+    <div className="w-screen h-screen overflow-hidden bg-black">
+      {screen === 'menu' && (
+        <MainMenu onEnterWorld={handleEnterWorld} />
+      )}
+      {screen === 'game' && activeWorld && (
+        <GameView onExit={handleExitToMenu} />
+      )}
     </div>
-  );
+  )
 }
-
-function Router() {
-  return (
-    <Switch>
-      <Route path="/" component={Home} />
-      <Route component={NotFound} />
-    </Switch>
-  );
-}
-
-function App() {
-  return (
-    <QueryClientProvider client={queryClient}>
-      <TooltipProvider>
-        <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-          <Router />
-        </WouterRouter>
-        <Toaster />
-      </TooltipProvider>
-    </QueryClientProvider>
-  );
-}
-
-export default App;
