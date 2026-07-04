@@ -1,6 +1,7 @@
 appId: com.genesis.game
 productName: Genesis
 copyright: Genesis
+description: A self-evolving 3D AI-driven simulation
 
 directories:
   output: dist/electron
@@ -14,6 +15,8 @@ files:
 extraMetadata:
   main: electron/main.js
 
+publish: never
+
 win:
   target:
     - target: nsis
@@ -23,8 +26,6 @@ win:
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
-  installerIcon: build-resources/icon.ico
-  installerHeaderIcon: build-resources/icon.ico
   createDesktopShortcut: true
   createStartMenuShortcut: true
   shortcutName: Genesis
@@ -42,7 +43,3 @@ linux:
       arch: [x64]
   icon: build-resources/icon.png
   category: Game
-
-publish:
-  provider: github
-  releaseType: draft
