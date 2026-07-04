@@ -1,7 +1,6 @@
 appId: com.genesis.game
 productName: Genesis
 copyright: Genesis
-description: A self-evolving 3D AI-driven simulation
 
 directories:
   output: dist/electron
