@@ -110,7 +110,8 @@ export default function GameView({ onExit }: Props) {
     }, 30_000)
 
     if (aiReady) {
-      setTimeout(runAITick, 3000)
+      const tickRef = runAITick
+      setTimeout(() => tickRef(), 3000)
     }
 
     return () => {
@@ -118,7 +119,7 @@ export default function GameView({ onExit }: Props) {
       if (aiIntervalRef.current) clearInterval(aiIntervalRef.current)
       if (saveIntervalRef.current) clearInterval(saveIntervalRef.current)
     }
-  }, [])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (aiReady && engineRef.current) {

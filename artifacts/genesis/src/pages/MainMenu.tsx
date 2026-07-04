@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { saveManager, type WorldSave } from '../store/saveManager'
 import { genesisAI } from '../ai/GenesisAI'
 import { useGameStore } from '../store/gameStore'
@@ -29,6 +29,17 @@ export default function MainMenu({ onEnterWorld }: Props) {
   const [aiProgress, setAiProgress] = useState(0)
   const [aiMessage, setAiMessage] = useState('')
   const { setCurrentWorld, setAiReady } = useGameStore()
+
+  const stars = useMemo(
+    () =>
+      Array.from({ length: 60 }, () => ({
+        size: Math.random() * 2 + 0.5,
+        left: Math.random() * 100,
+        top: Math.random() * 100,
+        opacity: Math.random() * 0.6 + 0.1,
+      })),
+    []
+  )
 
   useEffect(() => {
     loadWorlds()
@@ -85,16 +96,16 @@ export default function MainMenu({ onEnterWorld }: Props) {
       <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_#0a0a2a_0%,_#000000_70%)]" />
 
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        {Array.from({ length: 60 }).map((_, i) => (
+        {stars.map((star, i) => (
           <div
             key={i}
             className="absolute rounded-full bg-white"
             style={{
-              width: Math.random() * 2 + 0.5 + 'px',
-              height: Math.random() * 2 + 0.5 + 'px',
-              left: Math.random() * 100 + '%',
-              top: Math.random() * 100 + '%',
-              opacity: Math.random() * 0.6 + 0.1,
+              width: star.size + 'px',
+              height: star.size + 'px',
+              left: star.left + '%',
+              top: star.top + '%',
+              opacity: star.opacity,
             }}
           />
         ))}

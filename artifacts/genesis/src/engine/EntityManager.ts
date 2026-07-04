@@ -8,6 +8,7 @@ interface LiveEntity {
   targetPosition: THREE.Vector3
   moveTimer: number
   behaviorTimer: number
+  originalSize: number
 }
 
 export class EntityManager {
@@ -40,6 +41,7 @@ export class EntityManager {
       targetPosition: mesh.position.clone(),
       moveTimer: Math.random() * 3,
       behaviorTimer: Math.random() * 10,
+      originalSize: size,
     })
   }
 
@@ -55,13 +57,13 @@ export class EntityManager {
   updateEntity(id: string, updates: Partial<EntityData>): void {
     const entity = this.entities.get(id)
     if (!entity) return
-    entity.data = { ...entity.data, ...updates }
     if (updates.color) {
       ;(entity.mesh.material as THREE.MeshLambertMaterial).color.set(updates.color)
     }
     if (updates.size) {
-      entity.mesh.scale.setScalar(updates.size / (entity.data.size || 1))
+      entity.mesh.scale.setScalar(updates.size / entity.originalSize)
     }
+    entity.data = { ...entity.data, ...updates }
   }
 
   update(delta: number, playerPosition: THREE.Vector3): void {

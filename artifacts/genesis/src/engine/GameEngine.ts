@@ -59,7 +59,7 @@ export class GameEngine {
   }
 
   private onEscape = (e: KeyboardEvent) => {
-    if (e.code === 'Escape' && !this.controller.locked) {
+    if (e.code === 'Escape' && this.controller.locked) {
       this.onPause?.()
     }
   }
