@@ -19,8 +19,13 @@ export default function GameView({ onExit }: Props) {
   const [paused, setPaused] = useState(false)
   const [showLog, setShowLog] = useState(true)
   const [aiThinking, setAiThinking] = useState(false)
+  const [lastAiAction, setLastAiAction] = useState<string>('')
 
-  const { currentWorld, addEvent, addEntity, removeEntity, updateEntity, addMechanic, updateAiMemory, incrementGeneration, updatePlayTime, aiReady, setLoading } = useGameStore()
+  const {
+    currentWorld, addEvent, addEntity, removeEntity,
+    updateEntity, addMechanic, updateAiMemory,
+    incrementGeneration, updatePlayTime, aiReady,
+  } = useGameStore()
 
   const runAITick = useCallback(async () => {
     if (!currentWorld || !aiReady || aiThinking) return
@@ -45,48 +50,107 @@ export default function GameView({ onExit }: Props) {
           addEntity(entity)
           engineRef.current?.spawnEntity(entity)
           addEvent({ message: `ИИ создал: ${entity.name} — ${entity.behavior}`, type: 'ai_create' })
+          setLastAiAction(`Создал: ${entity.name}`)
           incrementGeneration()
           break
         }
+
         case 'remove_entity': {
           removeEntity(command.entityId)
           engineRef.current?.removeEntity(command.entityId)
           addEvent({ message: `ИИ убрал существо`, type: 'ai_update' })
+          setLastAiAction('Убрал существо')
           break
         }
+
         case 'evolve_entity': {
           updateEntity(command.entityId, command.changes)
           engineRef.current?.updateEntity(command.entityId, command.changes)
           addEvent({ message: `ИИ эволюционировал существо`, type: 'ai_update' })
+          setLastAiAction('Мутация существа')
           break
         }
+
         case 'add_mechanic': {
-          const mechanic: MechanicData = { ...command.mechanic, id: command.mechanic.id || crypto.randomUUID(), active: true }
+          const mechanic: MechanicData = {
+            ...command.mechanic,
+            id: command.mechanic.id || crypto.randomUUID(),
+            active: true,
+          }
           addMechanic(mechanic)
           addEvent({ message: `ИИ добавил механику: ${mechanic.name}`, type: 'ai_create' })
+          setLastAiAction(`Механика: ${mechanic.name}`)
           break
         }
-        case 'world_message': {
-          addEvent({ message: `Мир: ${command.message}`, type: 'world' })
+
+        case 'modify_terrain': {
+          const mod = command.modification
+          if (mod && mod.type && mod.position && mod.radius && mod.strength) {
+            engineRef.current?.applyTerrainMod(mod)
+            const typeNames: Record<string, string> = {
+              mountain: 'гора', cave: 'пещера', river: 'река', anomaly: 'аномалия',
+            }
+            addEvent({
+              message: `ИИ изменил рельеф: ${typeNames[mod.type] ?? mod.type} (сила ${mod.strength})`,
+              type: 'world',
+            })
+            setLastAiAction(`Рельеф: ${typeNames[mod.type] ?? mod.type}`)
+          }
           break
         }
-        case 'player_ability': {
-          addEvent({ message: `Новая способность: ${command.ability} — ${command.description}`, type: 'ai_create' })
+
+        case 'add_weather': {
+          const { weather, intensity } = command
+          if (weather) {
+            engineRef.current?.setWeather(weather, intensity ?? 1)
+            addEvent({ message: `ИИ изменил погоду: ${weather} (интенсивность ${intensity ?? 1})`, type: 'world' })
+            setLastAiAction(`Погода: ${weather}`)
+          }
           break
         }
+
+        case 'spawn_structure': {
+          const { name, type, position } = command
+          if (name && type) {
+            const pos: [number, number, number] = Array.isArray(position) && position.length >= 3
+              ? position
+              : [
+                  (Math.random() - 0.5) * 100,
+                  0,
+                  (Math.random() - 0.5) * 100,
+                ]
+            engineRef.current?.spawnStructure(name, type, pos)
+            addEvent({ message: `ИИ построил: ${name} (${type})`, type: 'ai_create' })
+            setLastAiAction(`Постройка: ${name}`)
+          }
+          break
+        }
+
         case 'start_event': {
           addEvent({ message: `Событие: ${command.name} — ${command.description}`, type: 'world' })
+          setLastAiAction(`Событие: ${command.name}`)
           break
         }
-        case 'spawn_structure': {
-          addEvent({ message: `ИИ создал структуру: ${command.name}`, type: 'ai_create' })
+
+        case 'player_ability': {
+          addEvent({ message: `Новая способность: ${command.ability} — ${command.description}`, type: 'ai_create' })
+          setLastAiAction(`Способность: ${command.ability}`)
           break
         }
+
+        case 'world_message': {
+          addEvent({ message: `Мир: ${command.message}`, type: 'world' })
+          setLastAiAction('Послание мира')
+          break
+        }
+
         default:
           break
       }
 
-      updateAiMemory(`Последнее действие: ${command.action} в поколении ${currentWorld.worldState.generation}`)
+      updateAiMemory(
+        `Поколение ${currentWorld.worldState.generation}: ${command.action}`,
+      )
     } catch (e) {
       console.warn('AI tick error', e)
     } finally {
@@ -125,7 +189,7 @@ export default function GameView({ onExit }: Props) {
     if (aiReady && engineRef.current) {
       setTimeout(runAITick, 2000)
     }
-  }, [aiReady])
+  }, [aiReady]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (aiIntervalRef.current) clearInterval(aiIntervalRef.current)
@@ -146,6 +210,7 @@ export default function GameView({ onExit }: Props) {
         }}
       />
 
+      {/* Прицел */}
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none">
         <div className="w-4 h-4 flex items-center justify-center">
           <div className="w-[2px] h-3 bg-white opacity-70 absolute" />
@@ -153,14 +218,21 @@ export default function GameView({ onExit }: Props) {
         </div>
       </div>
 
+      {/* Лог событий */}
       {showLog && (
-        <div className="absolute bottom-4 left-4 w-80 max-h-48 overflow-hidden pointer-events-none">
+        <div className="absolute bottom-4 left-4 w-80 max-h-52 overflow-hidden pointer-events-none">
           <div className="space-y-1">
             {recentEvents.map((e, i) => (
               <div
                 key={i}
                 className="text-xs px-2 py-1 rounded bg-black/60 backdrop-blur-sm"
-                style={{ color: e.type === 'ai_create' ? '#88ffaa' : e.type === 'world' ? '#aaaaff' : '#ffffff', opacity: 1 - i * 0.1 }}
+                style={{
+                  color:
+                    e.type === 'ai_create' ? '#88ffaa' :
+                    e.type === 'ai_update' ? '#ffdd88' :
+                    e.type === 'world'     ? '#aaaaff' : '#ffffff',
+                  opacity: 1 - i * 0.1,
+                }}
               >
                 {e.message}
               </div>
@@ -169,6 +241,7 @@ export default function GameView({ onExit }: Props) {
         </div>
       )}
 
+      {/* HUD справа */}
       <div className="absolute top-4 right-4 flex flex-col items-end gap-2 pointer-events-auto">
         <div className="text-xs text-white/50 bg-black/40 px-2 py-1 rounded">
           Поколение {currentWorld?.worldState.generation ?? 0}
@@ -179,6 +252,11 @@ export default function GameView({ onExit }: Props) {
         {aiThinking && (
           <div className="text-xs text-green-400/80 bg-black/40 px-2 py-1 rounded animate-pulse">
             ИИ думает...
+          </div>
+        )}
+        {!aiThinking && lastAiAction && (
+          <div className="text-xs text-green-300/60 bg-black/40 px-2 py-1 rounded max-w-[160px] truncate">
+            ↳ {lastAiAction}
           </div>
         )}
         <button
@@ -195,6 +273,7 @@ export default function GameView({ onExit }: Props) {
         </button>
       </div>
 
+      {/* Пауза */}
       {paused && (
         <div className="absolute inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center">
           <div className="bg-zinc-900 border border-zinc-700 rounded-xl p-8 w-64 flex flex-col gap-4">
@@ -225,7 +304,7 @@ export default function GameView({ onExit }: Props) {
 
       {!paused && (
         <div className="absolute bottom-4 right-4 text-xs text-white/20 pointer-events-none">
-          ЛКМ — захват мыши · ESC — пауза · E — взаимодействие
+          ЛКМ — захват мыши · ESC — пауза
         </div>
       )}
     </div>
