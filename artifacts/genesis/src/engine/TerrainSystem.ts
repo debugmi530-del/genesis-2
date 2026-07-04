@@ -14,7 +14,7 @@ export function getTerrainHeight(x: number, z: number, seed: number): number {
   return noise(x, z, seed)
 }
 
-export function createTerrain(seed: number, size = 500, segments = 128): THREE.Mesh {
+export function createTerrain(seed: number, size = 4000, segments = 256): THREE.Mesh {
   const geometry = new THREE.PlaneGeometry(size, size, segments, segments)
   geometry.rotateX(-Math.PI / 2)
 
@@ -41,7 +41,7 @@ export function createTerrain(seed: number, size = 500, segments = 128): THREE.M
 
 export function createSky(scene: THREE.Scene): void {
   scene.background = new THREE.Color(0x87ceeb)
-  scene.fog = new THREE.FogExp2(0xc9e8f5, 0.008)
+  scene.fog = new THREE.FogExp2(0xc9e8f5, 0.003)
 
   const ambientLight = new THREE.AmbientLight(0xffffff, 1.2)
   scene.add(ambientLight)
