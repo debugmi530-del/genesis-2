@@ -38,7 +38,7 @@ export class GameEngine {
     const terrain = createTerrain(this.seed)
     this.scene.add(terrain)
 
-    this.camera = new THREE.PerspectiveCamera(75, canvas.clientWidth / canvas.clientHeight, 0.1, 1000)
+    this.camera = new THREE.PerspectiveCamera(75, canvas.clientWidth / canvas.clientHeight, 0.1, 3000)
     const startX = 0
     const startZ = 0
     const startY = getTerrainHeight(startX, startZ, this.seed) + 1.7
