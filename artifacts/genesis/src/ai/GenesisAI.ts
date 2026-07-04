@@ -80,12 +80,16 @@ export class GenesisAI {
 
     // Step 2: load WebLLM and start model download
     // initProgressCallback must be passed to CreateMLCEngine, not to reload()
-    onProgress(1, 'Инициализация движка...')
+    onProgress(0, 'Инициализация движка...')
     try {
       const webllm = await import('@mlc-ai/web-llm')
+      let highWaterMark = 0
       this.engine = await webllm.CreateMLCEngine(MODEL_ID, {
         initProgressCallback: (p: { progress: number; text: string }) => {
-          onProgress(Math.round(p.progress * 100), p.text)
+          // прогресс только вперёд — никогда не откатывается назад
+          const pct = Math.round(p.progress * 100)
+          if (pct > highWaterMark) highWaterMark = pct
+          onProgress(highWaterMark, p.text)
         },
       }) as WebLLMEngine
     } catch (e) {
