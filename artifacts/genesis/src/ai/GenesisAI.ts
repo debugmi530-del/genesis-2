@@ -16,6 +16,7 @@ export type AIInitError =
   | 'webgpu_not_supported'
   | 'webgpu_no_adapter'
   | 'network_error'
+  | 'cache_error'
   | 'unknown'
 
 interface WebLLMEngine {
@@ -94,7 +95,17 @@ export class GenesisAI {
       }) as WebLLMEngine
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
-      if (msg.includes('fetch') || msg.includes('network') || msg.includes('load')) {
+      if (
+        msg.includes('QuotaExceeded') ||
+        msg.includes('quota') ||
+        msg.includes('storage') ||
+        msg.toLowerCase().includes('cache') ||
+        msg.includes('QUOTA_BYTES')
+      ) {
+        this.lastInitError = 'cache_error'
+        throw new Error('cache_error')
+      }
+      if (msg.includes('fetch') || msg.includes('network') || msg.includes('ERR_') || msg.includes('load')) {
         this.lastInitError = 'network_error'
         throw new Error('network_error')
       }
@@ -104,6 +115,51 @@ export class GenesisAI {
 
     this.isInitialized = true
     this.lastInitError = null
+  }
+
+  // Сбросить состояние движка (перед повторной инициализацией)
+  reset(): void {
+    this.engine = null
+    this.isInitialized = false
+    this.isGenerating = false
+    this.lastInitError = null
+  }
+
+  // Удалить кэш нейросети из браузера (Cache API + IndexedDB WebLLM)
+  static async clearCache(): Promise<void> {
+    // Удаляем все кэши Cache API на этом origin (WebLLM хранит веса модели здесь)
+    if ('caches' in window) {
+      try {
+        const keys = await caches.keys()
+        await Promise.all(keys.map(key => caches.delete(key)))
+      } catch (_) {
+        // игнорируем — продолжаем
+      }
+    }
+
+    // Удаляем IndexedDB базы WebLLM/MLC если они есть
+    try {
+      if (indexedDB.databases) {
+        const dbs = await indexedDB.databases()
+        for (const db of dbs) {
+          if (
+            db.name &&
+            (db.name.toLowerCase().includes('mlc') ||
+              db.name.toLowerCase().includes('webllm') ||
+              db.name.includes(MODEL_ID))
+          ) {
+            await new Promise<void>((resolve) => {
+              const req = indexedDB.deleteDatabase(db.name!)
+              req.onsuccess = () => resolve()
+              req.onerror = () => resolve()
+              req.onblocked = () => resolve()
+            })
+          }
+        }
+      }
+    } catch (_) {
+      // не все браузеры поддерживают indexedDB.databases()
+    }
   }
 
   async generateCommand(worldState: WorldState, playerAction?: string): Promise<AICommand | null> {
