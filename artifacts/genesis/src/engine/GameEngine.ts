@@ -5,9 +5,10 @@ import {
   createTerrain, createSky, getTerrainHeight,
   addTerrainMod, rebuildTerrainMesh, createStructureMesh,
 } from './TerrainSystem'
+import type { StructurePart } from './TerrainSystem'
 import type { WorldSave, TerrainModification } from '../store/saveManager'
 
-function createRainParticles(intensity: number): THREE.Points {
+function createRainParticles(intensity: number, color = 0xaabbff, size = 0.18, fallSpeed = 0): THREE.Points {
   const count = Math.floor(3000 * Math.max(0.3, intensity))
   const pos = new Float32Array(count * 3)
   for (let i = 0; i < count; i++) {
@@ -17,14 +18,10 @@ function createRainParticles(intensity: number): THREE.Points {
   }
   const geo = new THREE.BufferGeometry()
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3))
-  const mat = new THREE.PointsMaterial({
-    color: 0xaabbff,
-    size: 0.18,
-    transparent: true,
-    opacity: 0.55,
-    depthWrite: false,
-  })
-  return new THREE.Points(geo, mat)
+  const mat = new THREE.PointsMaterial({ color, size, transparent: true, opacity: 0.55, depthWrite: false })
+  const pts = new THREE.Points(geo, mat)
+  ;(pts as any).__fallSpeed = fallSpeed || (18 + intensity * 12)
+  return pts
 }
 
 export class GameEngine {
@@ -40,18 +37,13 @@ export class GameEngine {
   private onPause?: () => void
 
   private rainParticles: THREE.Points | null = null
-  private rainFallSpeed = 0
   private ambientLight: THREE.AmbientLight | null = null
 
   constructor(canvas: HTMLCanvasElement, world: WorldSave, onPause?: () => void) {
     this.seed = world.seed
     this.onPause = onPause
 
-    this.renderer = new THREE.WebGLRenderer({
-      canvas,
-      antialias: true,
-      powerPreference: 'high-performance',
-    })
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' })
     this.renderer.setSize(canvas.clientWidth, canvas.clientHeight)
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
     this.renderer.shadowMap.enabled = true
@@ -63,7 +55,6 @@ export class GameEngine {
     this.scene = new THREE.Scene()
     createSky(this.scene)
 
-    // сохраняем ссылку на ambient light для weather
     this.scene.children.forEach(c => {
       if (c instanceof THREE.AmbientLight) this.ambientLight = c
     })
@@ -89,47 +80,37 @@ export class GameEngine {
   setWeather(weather: string, intensity: number): void {
     const w = weather.toLowerCase()
     const fog = this.scene.fog as THREE.FogExp2
-
-    // убрать старые частицы
     if (this.rainParticles) {
       this.scene.remove(this.rainParticles)
       this.rainParticles.geometry.dispose()
       ;(this.rainParticles.material as THREE.Material).dispose()
       this.rainParticles = null
     }
-
-    const clampedIntensity = Math.max(0.1, Math.min(3, intensity))
+    const ci = Math.max(0.1, Math.min(3, intensity))
 
     if (w.includes('rain') || w.includes('дожд')) {
-      fog.density = 0.004 + clampedIntensity * 0.002
-      this.rainParticles = createRainParticles(clampedIntensity)
-      this.rainFallSpeed = 18 + clampedIntensity * 12
+      fog.density = 0.004 + ci * 0.002
+      this.rainParticles = createRainParticles(ci)
       this.scene.add(this.rainParticles)
       if (this.ambientLight) this.ambientLight.intensity = 0.7
 
     } else if (w.includes('storm') || w.includes('шторм') || w.includes('гроз')) {
       fog.density = 0.009
-      this.rainParticles = createRainParticles(clampedIntensity * 1.8)
-      this.rainFallSpeed = 35
+      this.rainParticles = createRainParticles(ci * 1.8, 0xaabbff, 0.18, 35)
       this.scene.add(this.rainParticles)
       if (this.ambientLight) this.ambientLight.intensity = 0.4
       this.scene.background = new THREE.Color(0x445566)
 
     } else if (w.includes('snow') || w.includes('снег')) {
-      fog.density = 0.005 + clampedIntensity * 0.001
-      this.rainParticles = createRainParticles(clampedIntensity * 0.6)
-      this.rainFallSpeed = 4
-      // перекрашиваем частицы в белый
-      ;(this.rainParticles.material as THREE.PointsMaterial).color.setHex(0xffffff)
-      ;(this.rainParticles.material as THREE.PointsMaterial).size = 0.35
+      fog.density = 0.005 + ci * 0.001
+      this.rainParticles = createRainParticles(ci * 0.6, 0xffffff, 0.35, 4)
       this.scene.add(this.rainParticles)
 
     } else if (w.includes('fog') || w.includes('туман')) {
-      fog.density = 0.007 + clampedIntensity * 0.005
+      fog.density = 0.007 + ci * 0.005
       if (this.ambientLight) this.ambientLight.intensity = 0.8
 
     } else {
-      // clear / ясно / солнечно
       fog.density = 0.003
       this.scene.background = new THREE.Color(0x87ceeb)
       if (this.ambientLight) this.ambientLight.intensity = 1.2
@@ -138,15 +119,15 @@ export class GameEngine {
 
   // ─── Structures ───────────────────────────────────────────────────────────
 
-  spawnStructure(name: string, type: string, position: [number, number, number]): void {
-    const group = createStructureMesh(type)
+  spawnStructure(name: string, type: string, position: [number, number, number], parts?: StructurePart[]): void {
+    const group = createStructureMesh(type, parts)
     const groundY = getTerrainHeight(position[0], position[2], this.seed)
     group.position.set(position[0], groundY, position[2])
     group.name = `structure_${name}`
     this.scene.add(group)
   }
 
-  // ─── Terrain modification ─────────────────────────────────────────────────
+  // ─── Terrain ──────────────────────────────────────────────────────────────
 
   applyTerrainMod(mod: TerrainModification): void {
     addTerrainMod(mod)
@@ -196,13 +177,13 @@ export class GameEngine {
 
   private updateRain(delta: number): void {
     if (!this.rainParticles) return
+    const fallSpeed: number = (this.rainParticles as any).__fallSpeed ?? 20
     const pos = this.rainParticles.geometry.attributes.position as THREE.BufferAttribute
     for (let i = 0; i < pos.count; i++) {
-      const y = pos.getY(i) - this.rainFallSpeed * delta
+      const y = pos.getY(i) - fallSpeed * delta
       pos.setY(i, y < -3 ? 65 : y)
     }
     pos.needsUpdate = true
-    // двигаем вместе с камерой
     this.rainParticles.position.x = this.camera.position.x
     this.rainParticles.position.z = this.camera.position.z
   }
