@@ -42,7 +42,7 @@ function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t
 }
 
-// ─── Terrain modifications (применяются поверх базового шума) ────────────────
+// ─── Terrain modifications ────────────────────────────────────────────────────
 
 const activeMods: TerrainModification[] = []
 
@@ -77,8 +77,6 @@ function getModHeight(x: number, z: number): number {
   return extra
 }
 
-// ─── Высота рельефа ──────────────────────────────────────────────────────────
-
 export function getTerrainHeight(x: number, z: number, seed: number): number {
   const s = (seed % 10000) + 1
   const ctrl = fbm(x * 0.0012 + s * 0.001, z * 0.0012 + s * 0.0013, s, 4)
@@ -92,29 +90,22 @@ export function getTerrainHeight(x: number, z: number, seed: number): number {
   return base + getModHeight(x, z)
 }
 
-// ─── Rebuild mesh после модификаций ─────────────────────────────────────────
-
 export function rebuildTerrainMesh(mesh: THREE.Mesh, seed: number): void {
   const geo = mesh.geometry as THREE.BufferGeometry
   const positions = geo.attributes.position as THREE.BufferAttribute
   const colors    = geo.attributes.color    as THREE.BufferAttribute
   const color = new THREE.Color()
-
   for (let i = 0; i < positions.count; i++) {
-    const x = positions.getX(i)
-    const z = positions.getZ(i)
+    const x = positions.getX(i), z = positions.getZ(i)
     const h = getTerrainHeight(x, z, seed)
     positions.setY(i, h)
-
     if (colors) {
       if      (h < -2)  color.setHex(0x3a6b8a)
       else if (h < 3)   color.setHex(0x4a8c35)
       else if (h < 12)  color.setHex(0x5a7a40)
       else if (h < 25)  color.setHex(0x7a6a52)
       else              color.setHex(0xd0cfc8)
-      colors[i * 3]     = color.r
-      colors[i * 3 + 1] = color.g
-      colors[i * 3 + 2] = color.b
+      colors.setXYZ(i, color.r, color.g, color.b)
     }
   }
   positions.needsUpdate = true
@@ -122,19 +113,15 @@ export function rebuildTerrainMesh(mesh: THREE.Mesh, seed: number): void {
   geo.computeVertexNormals()
 }
 
-// ─── Создание меша terrain ───────────────────────────────────────────────────
-
 export function createTerrain(seed: number, size = 4000, segments = 400): THREE.Mesh {
   const geometry = new THREE.PlaneGeometry(size, size, segments, segments)
   geometry.rotateX(-Math.PI / 2)
-
   const positions = geometry.attributes.position as THREE.BufferAttribute
   for (let i = 0; i < positions.count; i++) {
     positions.setY(i, getTerrainHeight(positions.getX(i), positions.getZ(i), seed))
   }
   positions.needsUpdate = true
   geometry.computeVertexNormals()
-
   const colors = new Float32Array(positions.count * 3)
   const color  = new THREE.Color()
   for (let i = 0; i < positions.count; i++) {
@@ -149,7 +136,6 @@ export function createTerrain(seed: number, size = 4000, segments = 400): THREE.
     colors[i * 3 + 2] = color.b
   }
   geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3))
-
   const mesh = new THREE.Mesh(
     geometry,
     new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.FrontSide })
@@ -159,117 +145,182 @@ export function createTerrain(seed: number, size = 4000, segments = 400): THREE.
   return mesh
 }
 
-// ─── 3D структуры ────────────────────────────────────────────────────────────
+// ─── Параметрические структуры ────────────────────────────────────────────────
 
-export function createStructureMesh(type: string): THREE.Group {
+export interface StructurePart {
+  shape: 'box' | 'cylinder' | 'sphere' | 'cone' | 'torus'
+  pos?: [number, number, number]
+  color?: string
+  glow?: boolean
+  opacity?: number
+  // box
+  size?: [number, number, number]
+  // cylinder / cone
+  r?: number
+  r1?: number
+  r2?: number
+  h?: number
+  // torus
+  tube?: number
+  // rotation
+  rotX?: number
+  rotY?: number
+  rotZ?: number
+}
+
+function buildPartMesh(part: StructurePart): THREE.Object3D {
+  const color   = new THREE.Color(part.color || '#888888')
+  const opacity = part.opacity ?? 1
+  const transparent = opacity < 1
+  const mat = new THREE.MeshLambertMaterial({ color, transparent, opacity })
+
+  let geo: THREE.BufferGeometry
+
+  switch (part.shape) {
+    case 'box': {
+      const [w = 1, h = 1, d = 1] = part.size ?? [1, 1, 1]
+      geo = new THREE.BoxGeometry(w, h, d)
+      break
+    }
+    case 'cylinder': {
+      const topR    = part.r1 ?? part.r ?? 0.5
+      const bottomR = part.r2 ?? part.r ?? 0.5
+      geo = new THREE.CylinderGeometry(topR, bottomR, part.h ?? 1, 10)
+      break
+    }
+    case 'cone': {
+      geo = new THREE.ConeGeometry(part.r ?? 0.5, part.h ?? 1, 8)
+      break
+    }
+    case 'sphere': {
+      geo = new THREE.SphereGeometry(part.r ?? 0.5, 10, 8)
+      break
+    }
+    case 'torus': {
+      geo = new THREE.TorusGeometry(part.r ?? 1, part.tube ?? 0.2, 8, 16)
+      break
+    }
+    default:
+      geo = new THREE.BoxGeometry(1, 1, 1)
+  }
+
+  const mesh = new THREE.Mesh(geo, mat)
+  mesh.castShadow = true
+
+  const [px = 0, py = 0, pz = 0] = part.pos ?? [0, 0, 0]
+  mesh.position.set(px, py, pz)
+
+  if (part.rotX) mesh.rotation.x = part.rotX
+  if (part.rotY) mesh.rotation.y = part.rotY
+  if (part.rotZ) mesh.rotation.z = part.rotZ
+
+  if (part.glow) {
+    const group = new THREE.Group()
+    group.add(mesh)
+    const light = new THREE.PointLight(color, 2, 20)
+    light.position.set(px, py, pz)
+    group.add(light)
+    return group
+  }
+
+  return mesh
+}
+
+// Создаёт 3D объект — либо по parts (custom), либо по named template
+export function createStructureMesh(type: string, parts?: StructurePart[]): THREE.Group {
   const group = new THREE.Group()
+
+  // ─ Параметрический режим ─
+  if (parts && parts.length > 0) {
+    for (const part of parts) {
+      try {
+        group.add(buildPartMesh(part))
+      } catch (_) {
+        // пропускаем битую часть
+      }
+    }
+    return group
+  }
+
+  // ─ Named templates (запасной вариант) ─
   const t = type.toLowerCase()
 
   if (t.includes('tree') || t.includes('дерев') || t.includes('лес')) {
     const trunkMat = new THREE.MeshLambertMaterial({ color: 0x4a3728 })
     const crownMat = new THREE.MeshLambertMaterial({ color: 0x2d7a1e })
     const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.5, 4, 7), trunkMat)
-    trunk.position.y = 2
-    trunk.castShadow = true
+    trunk.position.y = 2; trunk.castShadow = true
     const crown = new THREE.Mesh(new THREE.SphereGeometry(2.8, 8, 6), crownMat)
-    crown.position.y = 6
-    crown.castShadow = true
+    crown.position.y = 6; crown.castShadow = true
     group.add(trunk, crown)
 
-  } else if (t.includes('ancient') || t.includes('древн') || t.includes('старый')) {
+  } else if (t.includes('ancient') || t.includes('древн')) {
     const trunkMat = new THREE.MeshLambertMaterial({ color: 0x2a1a0e })
     const crownMat = new THREE.MeshLambertMaterial({ color: 0x1a4a0e })
     const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 1.0, 8, 7), trunkMat)
-    trunk.position.y = 4
-    trunk.castShadow = true
+    trunk.position.y = 4; trunk.castShadow = true
     const crown = new THREE.Mesh(new THREE.SphereGeometry(5, 8, 6), crownMat)
-    crown.position.y = 11
-    crown.scale.y = 0.7
-    crown.castShadow = true
+    crown.position.y = 11; crown.scale.y = 0.7; crown.castShadow = true
     group.add(trunk, crown)
 
-  } else if (t.includes('ruin') || t.includes('руин') || t.includes('разруш')) {
+  } else if (t.includes('ruin') || t.includes('руин')) {
     const mat = new THREE.MeshLambertMaterial({ color: 0x888070 })
     const walls: [number, number, number, number, number, number][] = [
-      [6, 3, 0.7, 0,    1.5, -3.3],
-      [0.7, 4, 5, 3.3,  2,   0   ],
+      [6, 3, 0.7, 0,   1.5, -3.3],
+      [0.7, 4, 5, 3.3, 2,   0   ],
       [3, 1.5, 0.7, -1.5, 0.75, 3.3],
     ]
     for (const [w, h, d, x, y, z] of walls) {
       const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat)
-      m.position.set(x, y, z)
-      m.rotation.y = (Math.random() - 0.5) * 0.15
-      m.castShadow = true
-      group.add(m)
-    }
-    // рассыпанные камни
-    const smallMat = new THREE.MeshLambertMaterial({ color: 0x777066 })
-    for (let i = 0; i < 5; i++) {
-      const s = 0.3 + Math.random() * 0.7
-      const sm = new THREE.Mesh(new THREE.DodecahedronGeometry(s, 0), smallMat)
-      sm.position.set((Math.random()-0.5)*5, s*0.5, (Math.random()-0.5)*5)
-      sm.rotation.set(Math.random(), Math.random(), Math.random())
-      group.add(sm)
+      m.position.set(x, y, z); m.rotation.y = (Math.random() - 0.5) * 0.15
+      m.castShadow = true; group.add(m)
     }
 
   } else if (t.includes('altar') || t.includes('алтар')) {
-    const stoneMat = new THREE.MeshLambertMaterial({ color: 0x445566 })
-    const plat = new THREE.Mesh(new THREE.BoxGeometry(5, 0.6, 5), stoneMat)
-    plat.position.y = 0.3
-    plat.castShadow = true
-    const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.45, 3.5, 8), stoneMat)
-    pillar.position.y = 2.05
-    pillar.castShadow = true
-    const orbMat = new THREE.MeshBasicMaterial({ color: 0x88aaff })
-    const orb = new THREE.Mesh(new THREE.SphereGeometry(0.55, 10, 10), orbMat)
+    const mat = new THREE.MeshLambertMaterial({ color: 0x445566 })
+    const plat = new THREE.Mesh(new THREE.BoxGeometry(5, 0.6, 5), mat)
+    plat.position.y = 0.3; plat.castShadow = true
+    const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.45, 3.5, 8), mat)
+    pillar.position.y = 2.05; pillar.castShadow = true
+    const orb = new THREE.Mesh(new THREE.SphereGeometry(0.55, 10, 10), new THREE.MeshBasicMaterial({ color: 0x88aaff }))
     orb.position.y = 4.1
     const light = new THREE.PointLight(0x6688ff, 2, 25)
     light.position.y = 4.1
     group.add(plat, pillar, orb, light)
 
   } else if (t.includes('nest') || t.includes('гнездо')) {
-    const logMat = new THREE.MeshLambertMaterial({ color: 0x5a3a20 })
+    const mat = new THREE.MeshLambertMaterial({ color: 0x5a3a20 })
     for (let i = 0; i < 7; i++) {
       const angle = (i / 7) * Math.PI * 2
-      const log = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.25, 3, 6), logMat)
+      const log = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.25, 3, 6), mat)
       log.position.set(Math.cos(angle) * 1.8, 0.5, Math.sin(angle) * 1.8)
-      log.rotation.z = Math.PI * 0.35
-      log.rotation.y = angle + Math.PI / 2
-      log.castShadow = true
-      group.add(log)
+      log.rotation.z = Math.PI * 0.35; log.rotation.y = angle + Math.PI / 2
+      log.castShadow = true; group.add(log)
     }
 
   } else if (t.includes('crystal') || t.includes('кристалл')) {
-    const colors = [0x88ffcc, 0xaaffee, 0x66ddff]
+    const cols = [0x88ffcc, 0xaaffee, 0x66ddff]
     for (let i = 0; i < 3; i++) {
-      const mat = new THREE.MeshLambertMaterial({ color: colors[i], transparent: true, opacity: 0.85 })
+      const mat = new THREE.MeshLambertMaterial({ color: cols[i], transparent: true, opacity: 0.85 })
       const h = 2 + i * 1.2
       const m = new THREE.Mesh(new THREE.ConeGeometry(0.4 - i * 0.1, h, 6), mat)
       m.position.set((i - 1) * 1.1, h / 2, (i % 2) * 0.6)
-      m.rotation.x = (Math.random() - 0.5) * 0.3
       group.add(m)
     }
-    const light = new THREE.PointLight(0x44ffcc, 1.5, 18)
-    light.position.y = 3
-    group.add(light)
+    group.add(Object.assign(new THREE.PointLight(0x44ffcc, 1.5, 18), { position: new THREE.Vector3(0, 3, 0) }))
 
-  } else if (t.includes('monolith') || t.includes('монолит') || t.includes('stone') || t.includes('камен')) {
+  } else if (t.includes('monolith') || t.includes('монолит')) {
     const mat = new THREE.MeshLambertMaterial({ color: 0x666055 })
     const m = new THREE.Mesh(new THREE.BoxGeometry(1.5, 6, 0.8), mat)
-    m.position.y = 3
-    m.rotation.y = (Math.random() - 0.5) * 0.3
-    m.castShadow = true
-    group.add(m)
+    m.position.y = 3; m.rotation.y = (Math.random() - 0.5) * 0.3
+    m.castShadow = true; group.add(m)
 
   } else {
-    // default — каменная башня
     const mat = new THREE.MeshLambertMaterial({ color: 0x777070 })
     const base = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 1.8, 5, 8), mat)
-    base.position.y = 2.5
-    base.castShadow = true
+    base.position.y = 2.5; base.castShadow = true
     const top = new THREE.Mesh(new THREE.ConeGeometry(1.6, 1.5, 8), new THREE.MeshLambertMaterial({ color: 0x554444 }))
-    top.position.y = 6
-    top.castShadow = true
+    top.position.y = 6; top.castShadow = true
     group.add(base, top)
   }
 
@@ -281,18 +332,14 @@ export function createStructureMesh(type: string): THREE.Group {
 export function createSky(scene: THREE.Scene): void {
   scene.background = new THREE.Color(0x87ceeb)
   scene.fog = new THREE.FogExp2(0xc9e8f5, 0.003)
-
   scene.add(new THREE.AmbientLight(0xffffff, 1.2))
-
   const sun = new THREE.DirectionalLight(0xfff4d0, 1.8)
   sun.position.set(80, 120, 60)
   sun.castShadow = true
   sun.shadow.mapSize.set(2048, 2048)
-  sun.shadow.camera.near = 0.5
-  sun.shadow.camera.far  = 500
+  sun.shadow.camera.near = 0.5; sun.shadow.camera.far = 500
   sun.shadow.camera.left = sun.shadow.camera.bottom = -150
   sun.shadow.camera.right = sun.shadow.camera.top   =  150
   scene.add(sun)
-
   scene.add(new THREE.HemisphereLight(0x87ceeb, 0x4a7c3f, 0.6))
 }
