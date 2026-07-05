@@ -41,9 +41,7 @@ export default function GameView({ onExit }: Props) {
             ...command.entity,
             id: command.entity.id || crypto.randomUUID(),
             position: command.entity.position || [
-              (Math.random() - 0.5) * 80,
-              0,
-              (Math.random() - 0.5) * 80,
+              (Math.random() - 0.5) * 80, 0, (Math.random() - 0.5) * 80,
             ],
             generation: (command.entity.generation ?? 0) + 1,
           }
@@ -85,16 +83,13 @@ export default function GameView({ onExit }: Props) {
 
         case 'modify_terrain': {
           const mod = command.modification
-          if (mod && mod.type && mod.position && mod.radius && mod.strength) {
+          if (mod?.type && mod.position && mod.radius && mod.strength) {
             engineRef.current?.applyTerrainMod(mod)
-            const typeNames: Record<string, string> = {
+            const names: Record<string, string> = {
               mountain: 'гора', cave: 'пещера', river: 'река', anomaly: 'аномалия',
             }
-            addEvent({
-              message: `ИИ изменил рельеф: ${typeNames[mod.type] ?? mod.type} (сила ${mod.strength})`,
-              type: 'world',
-            })
-            setLastAiAction(`Рельеф: ${typeNames[mod.type] ?? mod.type}`)
+            addEvent({ message: `ИИ изменил рельеф: ${names[mod.type] ?? mod.type}`, type: 'world' })
+            setLastAiAction(`Рельеф: ${names[mod.type] ?? mod.type}`)
           }
           break
         }
@@ -103,24 +98,21 @@ export default function GameView({ onExit }: Props) {
           const { weather, intensity } = command
           if (weather) {
             engineRef.current?.setWeather(weather, intensity ?? 1)
-            addEvent({ message: `ИИ изменил погоду: ${weather} (интенсивность ${intensity ?? 1})`, type: 'world' })
+            addEvent({ message: `Погода: ${weather} (${intensity ?? 1})`, type: 'world' })
             setLastAiAction(`Погода: ${weather}`)
           }
           break
         }
 
         case 'spawn_structure': {
-          const { name, type, position } = command
+          const { name, type, position, parts } = command
           if (name && type) {
             const pos: [number, number, number] = Array.isArray(position) && position.length >= 3
               ? position
-              : [
-                  (Math.random() - 0.5) * 100,
-                  0,
-                  (Math.random() - 0.5) * 100,
-                ]
-            engineRef.current?.spawnStructure(name, type, pos)
-            addEvent({ message: `ИИ построил: ${name} (${type})`, type: 'ai_create' })
+              : [(Math.random() - 0.5) * 100, 0, (Math.random() - 0.5) * 100]
+            engineRef.current?.spawnStructure(name, type, pos, parts)
+            const mode = parts && parts.length > 0 ? 'custom' : type
+            addEvent({ message: `ИИ построил: ${name} (${mode}, ${parts?.length ?? 0} частей)`, type: 'ai_create' })
             setLastAiAction(`Постройка: ${name}`)
           }
           break
@@ -133,7 +125,7 @@ export default function GameView({ onExit }: Props) {
         }
 
         case 'player_ability': {
-          addEvent({ message: `Новая способность: ${command.ability} — ${command.description}`, type: 'ai_create' })
+          addEvent({ message: `Способность: ${command.ability} — ${command.description}`, type: 'ai_create' })
           setLastAiAction(`Способность: ${command.ability}`)
           break
         }
@@ -143,14 +135,9 @@ export default function GameView({ onExit }: Props) {
           setLastAiAction('Послание мира')
           break
         }
-
-        default:
-          break
       }
 
-      updateAiMemory(
-        `Поколение ${currentWorld.worldState.generation}: ${command.action}`,
-      )
+      updateAiMemory(`Поколение ${currentWorld.worldState.generation}: ${command.action}`)
     } catch (e) {
       console.warn('AI tick error', e)
     } finally {
@@ -160,11 +147,9 @@ export default function GameView({ onExit }: Props) {
 
   useEffect(() => {
     if (!canvasRef.current || !currentWorld) return
-
     const engine = new GameEngine(canvasRef.current, currentWorld, () => setPaused(true))
     engineRef.current = engine
     engine.start()
-
     aiIntervalRef.current = setInterval(runAITick, AI_INTERVAL_MS)
     saveIntervalRef.current = setInterval(async () => {
       if (currentWorld) {
@@ -172,12 +157,7 @@ export default function GameView({ onExit }: Props) {
         await saveManager.saveWorld({ ...currentWorld, lastPlayedAt: Date.now() }).catch(() => {})
       }
     }, 30_000)
-
-    if (aiReady) {
-      const tickRef = runAITick
-      setTimeout(() => tickRef(), 3000)
-    }
-
+    if (aiReady) setTimeout(() => runAITick(), 3000)
     return () => {
       engine.dispose()
       if (aiIntervalRef.current) clearInterval(aiIntervalRef.current)
@@ -186,16 +166,12 @@ export default function GameView({ onExit }: Props) {
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (aiReady && engineRef.current) {
-      setTimeout(runAITick, 2000)
-    }
+    if (aiReady && engineRef.current) setTimeout(() => runAITick(), 2000)
   }, [aiReady]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (aiIntervalRef.current) clearInterval(aiIntervalRef.current)
-    if (!paused) {
-      aiIntervalRef.current = setInterval(runAITick, AI_INTERVAL_MS)
-    }
+    if (!paused) aiIntervalRef.current = setInterval(runAITick, AI_INTERVAL_MS)
   }, [paused, runAITick])
 
   const recentEvents = currentWorld?.worldState.eventLog.slice(0, 8) ?? []
@@ -205,9 +181,7 @@ export default function GameView({ onExit }: Props) {
       <canvas
         ref={canvasRef}
         className="w-full h-full"
-        onClick={() => {
-          if (!paused) engineRef.current?.requestPointerLock()
-        }}
+        onClick={() => { if (!paused) engineRef.current?.requestPointerLock() }}
       />
 
       {/* Прицел */}
@@ -218,7 +192,7 @@ export default function GameView({ onExit }: Props) {
         </div>
       </div>
 
-      {/* Лог событий */}
+      {/* Лог */}
       {showLog && (
         <div className="absolute bottom-4 left-4 w-80 max-h-52 overflow-hidden pointer-events-none">
           <div className="space-y-1">
@@ -241,7 +215,7 @@ export default function GameView({ onExit }: Props) {
         </div>
       )}
 
-      {/* HUD справа */}
+      {/* HUD */}
       <div className="absolute top-4 right-4 flex flex-col items-end gap-2 pointer-events-auto">
         <div className="text-xs text-white/50 bg-black/40 px-2 py-1 rounded">
           Поколение {currentWorld?.worldState.generation ?? 0}
@@ -261,7 +235,7 @@ export default function GameView({ onExit }: Props) {
         )}
         <button
           onClick={() => setShowLog(!showLog)}
-          className="text-xs text-white/40 bg-black/40 px-2 py-1 rounded hover:text-white/70"
+          className="text.xs text-white/40 bg-black/40 px-2 py-1 rounded hover:text-white/70"
         >
           {showLog ? 'Скрыть лог' : 'Показать лог'}
         </button>
@@ -279,19 +253,14 @@ export default function GameView({ onExit }: Props) {
           <div className="bg-zinc-900 border border-zinc-700 rounded-xl p-8 w-64 flex flex-col gap-4">
             <div className="text-white text-xl font-light tracking-widest text-center">ПАУЗА</div>
             <button
-              onClick={() => {
-                setPaused(false)
-                engineRef.current?.requestPointerLock()
-              }}
+              onClick={() => { setPaused(false); engineRef.current?.requestPointerLock() }}
               className="w-full py-2 rounded-lg bg-emerald-900/60 hover:bg-emerald-800/60 text-emerald-300 text-sm transition-colors"
             >
               Продолжить
             </button>
             <button
               onClick={async () => {
-                if (currentWorld) {
-                  await saveManager.saveWorld(currentWorld).catch(() => {})
-                }
+                if (currentWorld) await saveManager.saveWorld(currentWorld).catch(() => {})
                 onExit()
               }}
               className="w-full py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-white/60 text-sm transition-colors"
