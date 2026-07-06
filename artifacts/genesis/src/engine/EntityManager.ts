@@ -1,14 +1,16 @@
 import * as THREE from 'three'
 import type { EntityData } from '../store/saveManager'
-import { getTerrainHeightCached } from './TerrainSystem'
+import { getTerrainHeightCached, createFloraMesh } from './TerrainSystem'
+import type { StructurePart } from './TerrainSystem'
 
 interface LiveEntity {
   data: EntityData
-  mesh: THREE.Mesh
+  mesh: THREE.Object3D
   targetPosition: THREE.Vector3
   moveTimer: number
   behaviorTimer: number
   originalSize: number
+  hasParts: boolean
 }
 
 export class EntityManager {
@@ -24,15 +26,24 @@ export class EntityManager {
   spawnEntity(data: EntityData): void {
     if (this.entities.has(data.id)) return
 
-    const color = new THREE.Color(data.color || '#44ff88')
     const size = data.size || 1
-    const geometry = this.getGeometryForType(data.type, size)
-    const material = new THREE.MeshLambertMaterial({ color })
-    const mesh = new THREE.Mesh(geometry, material)
-    mesh.castShadow = true
+    const hasParts = Array.isArray(data.parts) && data.parts.length > 0
 
-    let y = getTerrainHeightCached(data.position[0], data.position[2], this.seed) + size * 0.5
-    mesh.position.set(data.position[0], y, data.position[2])
+    let mesh: THREE.Object3D
+
+    if (hasParts) {
+      mesh = createFloraMesh('custom', data.parts as StructurePart[], size, data.color)
+    } else {
+      const color = new THREE.Color(data.color || '#44ff88')
+      const geometry = this.getGeometryForType(data.type, size)
+      const material = new THREE.MeshLambertMaterial({ color })
+      const m = new THREE.Mesh(geometry, material)
+      m.castShadow = true
+      mesh = m
+    }
+
+    const groundY = getTerrainHeightCached(data.position[0], data.position[2], this.seed)
+    mesh.position.set(data.position[0], groundY + (hasParts ? 0 : size * 0.5), data.position[2])
 
     this.scene.add(mesh)
     this.entities.set(data.id, {
@@ -42,6 +53,7 @@ export class EntityManager {
       moveTimer: Math.random() * 3,
       behaviorTimer: Math.random() * 10,
       originalSize: size,
+      hasParts,
     })
   }
 
@@ -49,16 +61,26 @@ export class EntityManager {
     const entity = this.entities.get(id)
     if (!entity) return
     this.scene.remove(entity.mesh)
-    entity.mesh.geometry.dispose()
-    ;(entity.mesh.material as THREE.Material).dispose()
+    if (entity.hasParts) {
+      entity.mesh.traverse(child => {
+        if (child instanceof THREE.Mesh) child.geometry.dispose()
+      })
+    } else {
+      const m = entity.mesh as THREE.Mesh
+      m.geometry.dispose()
+      ;(m.material as THREE.Material).dispose()
+    }
     this.entities.delete(id)
   }
 
   updateEntity(id: string, updates: Partial<EntityData>): void {
     const entity = this.entities.get(id)
     if (!entity) return
-    if (updates.color) {
-      ;(entity.mesh.material as THREE.MeshLambertMaterial).color.set(updates.color)
+    if (!entity.hasParts) {
+      if (updates.color) {
+        ;(entity.mesh as THREE.Mesh).material &&
+          ((entity.mesh as THREE.Mesh).material as THREE.MeshLambertMaterial).color.set(updates.color)
+      }
     }
     if (updates.size) {
       entity.mesh.scale.setScalar(updates.size / entity.originalSize)
@@ -84,7 +106,7 @@ export class EntityManager {
         entity.mesh.position.addScaledVector(direction, speed * delta)
         entity.mesh.lookAt(entity.targetPosition)
         const groundY = getTerrainHeightCached(entity.mesh.position.x, entity.mesh.position.z, this.seed)
-        entity.mesh.position.y = groundY + (entity.data.size || 1) * 0.5
+        entity.mesh.position.y = groundY + (entity.hasParts ? 0 : (entity.data.size || 1) * 0.5)
       }
 
       if (entity.behaviorTimer <= 0) {
