@@ -97,7 +97,11 @@ export class FirstPersonController {
     this.camera.quaternion.setFromEuler(this.euler)
   }
 
-  update(delta: number, getGroundHeight: (x: number, z: number) => number) {
+  update(
+    delta: number,
+    getGroundHeight: (x: number, z: number) => number,
+    resolveCollision?: (pos: THREE.Vector3) => void,
+  ) {
     if (!this.isLocked) return
 
     const speed = this.SPEED * (this.sprint ? this.SPRINT_MULT : 1)
@@ -118,6 +122,9 @@ export class FirstPersonController {
 
     this.camera.position.x += this.velocity.x * delta
     this.camera.position.z += this.velocity.z * delta
+
+    // Resolve collisions against buildings and objects (horizontal only)
+    if (resolveCollision) resolveCollision(this.camera.position)
 
     this.verticalVelocity -= this.GRAVITY * delta
     this.camera.position.y += this.verticalVelocity * delta

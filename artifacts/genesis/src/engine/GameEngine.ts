@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { FirstPersonController } from './FirstPersonController'
 import { EntityManager } from './EntityManager'
+import { CollisionSystem } from './CollisionSystem'
 import {
   createTerrain, createSky, getTerrainHeightCached,
   addTerrainMod, rebuildTerrainMesh, createStructureMesh, createFloraMesh, clearTerrainMods,
@@ -30,6 +31,7 @@ export class GameEngine {
   private camera: THREE.PerspectiveCamera
   private controller: FirstPersonController
   private entityManager: EntityManager
+  private collisionSystem: CollisionSystem
   private terrain: THREE.Mesh
   private animationId: number | null = null
   private clock = new THREE.Clock()
@@ -75,6 +77,7 @@ export class GameEngine {
     this.camera.position.set(startX, getTerrainHeightCached(startX, startZ, this.seed) + 1.7, startZ)
 
     this.controller = new FirstPersonController(this.camera, canvas)
+    this.collisionSystem = new CollisionSystem()
     this.entityManager = new EntityManager(this.scene, this.seed)
     this.entityManager.spawnFromSavedData(world.worldState.entities)
 
@@ -179,6 +182,9 @@ export class GameEngine {
     group.position.set(position[0], groundY, position[2])
     group.name = `structure_${name}`
     this.scene.add(group)
+    // Register solid geometry for player collision
+    group.updateWorldMatrix(true, true)
+    this.collisionSystem.register(group)
   }
 
   // ─── Flora ────────────────────────────────────────────────────────────────
@@ -190,6 +196,10 @@ export class GameEngine {
     group.rotation.y = Math.random() * Math.PI * 2
     group.name = `flora_${name}`
     this.scene.add(group)
+    // Register solid geometry for player collision (tiny decorative flora is
+    // automatically skipped by CollisionSystem.MIN_FOOTPRINT threshold)
+    group.updateWorldMatrix(true, true)
+    this.collisionSystem.register(group)
   }
 
   // ─── Beacon ───────────────────────────────────────────────────────────────
@@ -219,6 +229,8 @@ export class GameEngine {
     group.position.set(position[0], groundY, position[2])
     group.name = `beacon_${name}`
     this.scene.add(group)
+    group.updateWorldMatrix(true, true)
+    this.collisionSystem.register(group)
   }
 
   // ─── Terrain ──────────────────────────────────────────────────────────────
@@ -261,7 +273,11 @@ export class GameEngine {
   private loop = (): void => {
     this.animationId = requestAnimationFrame(this.loop)
     const delta = Math.min(this.clock.getDelta(), 0.05)
-    this.controller.update(delta, (x, z) => getTerrainHeightCached(x, z, this.seed))
+    this.controller.update(
+      delta,
+      (x, z) => getTerrainHeightCached(x, z, this.seed),
+      (pos) => this.collisionSystem.resolve(pos),
+    )
     this.entityManager.update(delta, this.camera.position)
     this.updateRain(delta)
     this.renderer.render(this.scene, this.camera)
@@ -298,6 +314,7 @@ export class GameEngine {
     if (this.animationId !== null) cancelAnimationFrame(this.animationId)
     this.controller.disable()
     this.entityManager.dispose()
+    this.collisionSystem.clear()
     if (this.rainParticles) {
       this.scene.remove(this.rainParticles)
       this.rainParticles.geometry.dispose()
