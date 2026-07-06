@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { WorldSave, WorldState, EventEntry, EntityData, MechanicData } from './saveManager'
+import type { WorldSave, WorldState, EventEntry, EntityData, MechanicData, TerrainModification } from './saveManager'
 
 interface GameStore {
   currentWorld: WorldSave | null
@@ -19,6 +19,7 @@ interface GameStore {
   updateEntity: (id: string, updates: Partial<EntityData>) => void
   removeEntity: (id: string) => void
   addMechanic: (mechanic: MechanicData) => void
+  addTerrainMod: (mod: TerrainModification) => void
   updateAiMemory: (memory: string) => void
   incrementGeneration: () => void
   updatePlayTime: (seconds: number) => void
@@ -100,6 +101,18 @@ export const useGameStore = create<GameStore>((set, get) => ({
         currentWorld: {
           ...state.currentWorld,
           worldState: { ...state.currentWorld.worldState, mechanics },
+        },
+      }
+    }),
+
+  addTerrainMod: (mod) =>
+    set((state) => {
+      if (!state.currentWorld) return state
+      const terrain = [...state.currentWorld.worldState.terrain, mod]
+      return {
+        currentWorld: {
+          ...state.currentWorld,
+          worldState: { ...state.currentWorld.worldState, terrain },
         },
       }
     }),
