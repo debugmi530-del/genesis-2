@@ -20,6 +20,7 @@ interface GameStore {
   removeEntity: (id: string) => void
   addMechanic: (mechanic: MechanicData) => void
   addTerrainMod: (mod: TerrainModification) => void
+  addPlayerAbility: (ability: string) => void
   updateAiMemory: (memory: string) => void
   incrementGeneration: () => void
   updatePlayTime: (seconds: number) => void
@@ -113,6 +114,20 @@ export const useGameStore = create<GameStore>((set, get) => ({
         currentWorld: {
           ...state.currentWorld,
           worldState: { ...state.currentWorld.worldState, terrain },
+        },
+      }
+    }),
+
+  addPlayerAbility: (ability) =>
+    set((state) => {
+      if (!state.currentWorld) return state
+      // Avoid duplicates
+      if (state.currentWorld.worldState.playerAbilities.includes(ability)) return state
+      const playerAbilities = [...state.currentWorld.worldState.playerAbilities, ability]
+      return {
+        currentWorld: {
+          ...state.currentWorld,
+          worldState: { ...state.currentWorld.worldState, playerAbilities },
         },
       }
     }),
