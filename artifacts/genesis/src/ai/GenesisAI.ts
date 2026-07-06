@@ -14,24 +14,19 @@ export type AICommand =
   | { action: 'world_message'; message: string }
 
 export type AIInitError =
-  | 'webgpu_not_supported'
-  | 'webgpu_no_adapter'
-  | 'gpu_shader_error'
   | 'network_error'
   | 'cache_error'
   | 'unknown'
 
-interface WebLLMEngine {
-  chat: {
-    completions: {
-      create: (opts: {
-        messages: Array<{ role: string; content: string }>
-        max_tokens?: number
-        temperature?: number
-      }) => Promise<{ choices: Array<{ message: { content: string } }> }>
-    }
-  }
-}
+export type AIBackend = 'webgpu' | 'wasm'
+
+const MODEL_ID = 'onnx-community/Qwen2.5-0.5B-Instruct'
+
+type TFMessage = { role: string; content: string }
+type TFPipeline = (
+  messages: TFMessage[],
+  options: { max_new_tokens?: number; temperature?: number; do_sample?: boolean }
+) => Promise<Array<{ generated_text: TFMessage[] | string }>>
 
 const SYSTEM_PROMPT = `Ты — Genesis, живой творец миров. Управляешь симуляцией 3D-мира от первого лица.
 
@@ -116,111 +111,87 @@ world_message — послание мира игроку:
 5. В parts: pos[1] (y) — высота над землёй; складывай части вверх
 6. Реагируй на количество существ и историю мира`
 
-export const AVAILABLE_MODELS = [
-  { id: 'Phi-3.5-mini-instruct-q4f16_1-MLC',          label: 'Phi-3.5-mini',   size: '~2.1 ГБ', quality: 'лучшее качество' },
-  { id: 'Llama-3.2-1B-Instruct-q4f16_1-MLC',          label: 'Llama-3.2-1B',  size: '~0.8 ГБ', quality: 'быстрая' },
-  { id: 'Llama-3.2-3B-Instruct-q4f16_1-MLC',          label: 'Llama-3.2-3B',  size: '~1.7 ГБ', quality: 'хорошее' },
-  { id: 'Qwen2.5-0.5B-Instruct-q4f16_1-MLC',          label: 'Qwen2.5-0.5B',  size: '~0.4 ГБ', quality: 'минимальная' },
-  { id: 'gemma-2-2b-it-q4f16_1-MLC',                  label: 'Gemma-2-2B',    size: '~1.4 ГБ', quality: 'хорошее' },
-] as const
-
-export type ModelId = typeof AVAILABLE_MODELS[number]['id']
-
-const DEFAULT_MODEL: ModelId = 'Phi-3.5-mini-instruct-q4f16_1-MLC'
-const MODEL_SIZE_BYTES = 2.2 * 1024 * 1024 * 1024
-
 export class GenesisAI {
-  private engine: WebLLMEngine | null = null
+  private pipe: TFPipeline | null = null
   private isInitialized = false
   private isGenerating = false
   lastInitError: AIInitError | null = null
   lastRawError: string | null = null
-  activeModelId: ModelId = DEFAULT_MODEL
+  activeBackend: AIBackend | null = null
 
-  async initialize(
-    onProgress: (progress: number, message: string) => void,
-    modelId: ModelId = DEFAULT_MODEL
-  ): Promise<void> {
-    this.activeModelId = modelId
-    if (typeof navigator === 'undefined' || !navigator.gpu) {
-      this.lastInitError = 'webgpu_not_supported'
-      throw new Error('webgpu_not_supported')
-    }
+  async initialize(onProgress: (progress: number, message: string) => void): Promise<void> {
+    this.lastInitError = null
+    this.lastRawError = null
 
-    onProgress(0, 'Проверка GPU...')
-    const adapter = await navigator.gpu.requestAdapter()
-    if (!adapter) {
-      this.lastInitError = 'webgpu_no_adapter'
-      throw new Error('webgpu_no_adapter')
-    }
+    const hasWebGPU = typeof navigator !== 'undefined' && !!navigator.gpu
 
-    // Проверка свободного места
-    if ('storage' in navigator && 'estimate' in navigator.storage) {
+    if (hasWebGPU) {
+      onProgress(0, 'Инициализация WebGPU...')
       try {
-        const { quota = 0, usage = 0 } = await navigator.storage.estimate()
-        const available = quota - usage
-        if (available > 0 && available < MODEL_SIZE_BYTES) {
-          const mb = Math.round(available / 1024 / 1024)
-          onProgress(0, `Внимание: мало места (${mb} МБ). Нужно ~2200 МБ. Попробуем всё равно...`)
-          await new Promise(r => setTimeout(r, 3000))
-        }
-      } catch (_) {}
+        this.pipe = await this.loadPipeline('webgpu', onProgress)
+        this.activeBackend = 'webgpu'
+        this.isInitialized = true
+        return
+      } catch (e) {
+        console.warn('WebGPU pipeline failed, falling back to WASM CPU:', e)
+        this.pipe = null
+        onProgress(0, 'GPU недоступен — переключаюсь на CPU...')
+        await new Promise(r => setTimeout(r, 1200))
+      }
     }
 
-    onProgress(0, 'Загрузка ИИ движка...')
     try {
-      const webllm = await import('@mlc-ai/web-llm')
-      let highWaterMark = 0
-      this.engine = await webllm.CreateMLCEngine(modelId, {
-        initProgressCallback: (p: { progress: number; text: string }) => {
-          const pct = Math.round(p.progress * 100)
-          if (pct > highWaterMark) highWaterMark = pct
-          onProgress(highWaterMark, p.text)
-        },
-      }) as WebLLMEngine
+      this.pipe = await this.loadPipeline('wasm', onProgress)
+      this.activeBackend = 'wasm'
+      this.isInitialized = true
     } catch (e) {
       const msg  = e instanceof Error ? e.message : String(e)
-      const name = e instanceof Error ? e.name : ''
+      const name = e instanceof Error ? e.name  : ''
       this.lastRawError = `[${name}] ${msg}`
-      console.error('GenesisAI init error:', { name, message: msg, raw: e })
+      console.error('GenesisAI init error:', { name, msg, raw: e })
 
-      const isGPUShader =
-        name === 'GPUPipelineError' ||
-        msg.includes('ShaderModule') ||
-        msg.includes('compute stage') ||
-        msg.includes('GPUPipeline') ||
-        msg.includes('entryPoint') ||
-        msg.includes('index_kernel')
-      const isCache =
-        name === 'QuotaExceededError' ||
-        msg.includes('QuotaExceeded') ||
-        msg.includes('quota') ||
-        msg.includes('QUOTA_BYTES') ||
-        msg.includes('storage full')
-      const isNetwork =
-        msg.includes('fetch') ||
-        msg.includes('NetworkError') ||
-        msg.includes('ERR_') ||
-        msg.includes('Failed to load')
-
-      if (isGPUShader) { this.lastInitError = 'gpu_shader_error'; throw new Error('gpu_shader_error') }
-      if (isCache)     { this.lastInitError = 'cache_error';       throw new Error('cache_error') }
-      if (isNetwork)   { this.lastInitError = 'network_error';     throw new Error('network_error') }
+      if (msg.includes('fetch') || msg.includes('NetworkError') || msg.includes('Failed to fetch') || name === 'TypeError') {
+        this.lastInitError = 'network_error'; throw new Error('network_error')
+      }
+      if (msg.includes('quota') || msg.includes('QuotaExceeded') || name === 'QuotaExceededError') {
+        this.lastInitError = 'cache_error'; throw new Error('cache_error')
+      }
       this.lastInitError = 'unknown'
       throw e
     }
+  }
 
-    this.isInitialized = true
-    this.lastInitError = null
-    this.lastRawError = null
+  private async loadPipeline(device: AIBackend, onProgress: (p: number, m: string) => void): Promise<TFPipeline> {
+    const { pipeline } = await import('@huggingface/transformers')
+    let highWaterMark = 0
+
+    const dtype = device === 'webgpu' ? 'q4f16' : 'q4'
+    const modeLabel = device === 'webgpu' ? 'GPU' : 'CPU'
+
+    const pipe = await (pipeline as Function)('text-generation', MODEL_ID, {
+      device,
+      dtype,
+      progress_callback: (info: { status: string; progress?: number; file?: string }) => {
+        if (info.status === 'progress' && typeof info.progress === 'number') {
+          const pct = Math.round(info.progress)
+          if (pct > highWaterMark) highWaterMark = pct
+          const file = info.file?.split('/').pop() ?? ''
+          onProgress(highWaterMark, `[${modeLabel}] ${file} — ${pct}%`)
+        } else if (info.status === 'ready') {
+          onProgress(100, `[${modeLabel}] Модель готова`)
+        }
+      },
+    })
+    return pipe as TFPipeline
   }
 
   reset(): void {
-    this.engine = null
+    this.pipe = null
     this.isInitialized = false
     this.isGenerating = false
     this.lastInitError = null
     this.lastRawError = null
+    this.activeBackend = null
   }
 
   static async clearCache(): Promise<void> {
@@ -234,8 +205,9 @@ export class GenesisAI {
       if (indexedDB.databases) {
         const dbs = await indexedDB.databases()
         for (const db of dbs) {
-          if (db.name && (db.name.toLowerCase().includes('mlc') ||
-              db.name.toLowerCase().includes('webllm') || db.name.includes(MODEL_ID))) {
+          if (!db.name) continue
+          const n = db.name.toLowerCase()
+          if (n.includes('transformers') || n.includes('huggingface') || n.includes('qwen') || n.includes('onnx')) {
             await new Promise<void>(resolve => {
               const req = indexedDB.deleteDatabase(db.name!)
               req.onsuccess = req.onerror = req.onblocked = () => resolve()
@@ -247,18 +219,25 @@ export class GenesisAI {
   }
 
   async generateCommand(worldState: WorldState, playerAction?: string): Promise<AICommand | null> {
-    if (!this.isInitialized || !this.engine || this.isGenerating) return null
+    if (!this.isInitialized || !this.pipe || this.isGenerating) return null
     this.isGenerating = true
     try {
-      const response = await this.engine.chat.completions.create({
-        messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
-          { role: 'user',   content: this.describeState(worldState, playerAction) },
-        ],
-        max_tokens: 600,
+      const messages: TFMessage[] = [
+        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'user',   content: this.describeState(worldState, playerAction) },
+      ]
+      const output = await this.pipe(messages, {
+        max_new_tokens: 500,
         temperature: 0.85,
+        do_sample: true,
       })
-      const content = response.choices[0]?.message?.content
+      const generated = output[0]?.generated_text
+      let content: string
+      if (Array.isArray(generated)) {
+        content = (generated as TFMessage[]).at(-1)?.content ?? ''
+      } else {
+        content = generated as string
+      }
       if (!content) return null
       const jsonMatch = content.match(/\{[\s\S]*\}/)
       if (!jsonMatch) return null
