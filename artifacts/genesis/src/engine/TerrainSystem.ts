@@ -132,7 +132,7 @@ export function rebuildTerrainMesh(mesh: THREE.Mesh, seed: number): void {
   geo.computeVertexNormals()
 }
 
-export function createTerrain(seed: number, size = 4000, segments = 400): THREE.Mesh {
+export function createTerrain(seed: number, size = 4000, segments = 256): THREE.Mesh {
   const geometry = new THREE.PlaneGeometry(size, size, segments, segments)
   geometry.rotateX(-Math.PI / 2)
   const positions = geometry.attributes.position as THREE.BufferAttribute
