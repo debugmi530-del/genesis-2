@@ -296,16 +296,35 @@ function pickCreativeSeed(): string {
 
 // ─── CLASS ────────────────────────────────────────────────────────────────────
 
+type PendingGeneration = {
+  id: number
+  resolve: (msg: WorkerOutMessage) => void
+  reject:  (err: Error) => void
+  timeout: ReturnType<typeof setTimeout>
+}
+
+const GENERATE_TIMEOUT_MS = 300_000 // 5 min — generous for slow WASM devices
+
 export class GenesisAI {
   private worker: Worker | null = null
   private isInitialized = false
   private isGenerating = false
-  private pendingResolve: ((msg: WorkerOutMessage) => void) | null = null
+  private pending: PendingGeneration | null = null
   private nextGenerateId = 1
 
   lastInitError: AIInitError | null = null
   lastRawError: string | null = null
   activeBackend: AIBackend | null = null
+
+  // ── Internal: reject any in-flight generation (called on error/reset) ──────
+
+  private _abortPending(reason: string): void {
+    if (!this.pending) return
+    clearTimeout(this.pending.timeout)
+    this.pending.reject(new Error(reason))
+    this.pending = null
+    this.isGenerating = false
+  }
 
   // ── Initialization ─────────────────────────────────────────────────────────
 
@@ -313,12 +332,18 @@ export class GenesisAI {
     this.lastInitError = null
     this.lastRawError  = null
 
-    // Terminate any previous worker
+    // Terminate any previous worker and abort any in-flight generation
+    this._abortPending('reinitialized')
     this.worker?.terminate()
-    this.worker = new Worker(
+    this.worker        = null
+    this.isInitialized = false
+    this.activeBackend = null
+
+    const w = new Worker(
       new URL('./genesis.worker.ts', import.meta.url),
       { type: 'module' },
     )
+    this.worker = w
 
     const hasWebGPU = typeof navigator !== 'undefined' &&
       !!(navigator as Navigator & { gpu?: unknown }).gpu
@@ -327,9 +352,15 @@ export class GenesisAI {
     const dtype = hasWebGPU ? 'q4f16' : 'q4'
 
     return new Promise<void>((resolve, reject) => {
-      if (!this.worker) { reject(new Error('worker missing')); return }
+      const fail = (err: string, kind: AIInitError) => {
+        this.lastRawError  = err
+        this.lastInitError = kind
+        w.terminate()
+        if (this.worker === w) this.worker = null
+        reject(new Error(kind))
+      }
 
-      this.worker.onmessage = (e: MessageEvent<WorkerOutMessage>) => {
+      w.onmessage = (e: MessageEvent<WorkerOutMessage>) => {
         const msg = e.data
 
         if (msg.type === 'progress') {
@@ -340,33 +371,29 @@ export class GenesisAI {
         if (msg.type === 'ready') {
           this.isInitialized = true
           this.activeBackend = msg.backend
-          // Switch to the generate message handler
-          if (this.worker) this.worker.onmessage = this._onWorkerMessage
+          // Switch to the runtime message handler
+          w.onmessage = this._onWorkerMessage
+          w.onerror   = this._onWorkerError
           resolve()
           return
         }
 
         if (msg.type === 'init_error') {
           const err = msg.error
-          this.lastRawError = err
           if (err.includes('fetch') || err.includes('NetworkError') || err.includes('Failed to fetch')) {
-            this.lastInitError = 'network_error'; reject(new Error('network_error'))
+            fail(err, 'network_error')
           } else if (err.includes('quota') || err.includes('QuotaExceeded')) {
-            this.lastInitError = 'cache_error'; reject(new Error('cache_error'))
+            fail(err, 'cache_error')
           } else {
-            this.lastInitError = 'unknown'; reject(new Error(err))
+            fail(err, 'unknown')
           }
         }
       }
 
-      this.worker.onerror = (e) => {
-        this.lastRawError = e.message
-        this.lastInitError = 'unknown'
-        reject(new Error(e.message))
-      }
+      w.onerror = (e) => fail(e.message ?? 'worker error', 'unknown')
 
       const initMsg: WorkerInMessage = { type: 'init', device, dtype }
-      this.worker.postMessage(initMsg)
+      w.postMessage(initMsg)
     })
   }
 
@@ -374,23 +401,35 @@ export class GenesisAI {
 
   private _onWorkerMessage = (e: MessageEvent<WorkerOutMessage>) => {
     const msg = e.data
+    if (!this.pending) return
     if (msg.type === 'generate_result' || msg.type === 'generate_error') {
-      this.pendingResolve?.(msg)
-      this.pendingResolve = null
+      if ((msg as { id?: number }).id !== this.pending.id) return // stale response
+      clearTimeout(this.pending.timeout)
+      this.pending.resolve(msg)
+      this.pending = null
+      this.isGenerating = false
     }
+  }
+
+  // ── Worker runtime error handler (after initialization) ───────────────────
+
+  private _onWorkerError = (e: ErrorEvent) => {
+    console.warn('GenesisAI worker error:', e.message)
+    this._abortPending('worker runtime error: ' + e.message)
+    // Worker is in an unknown state; mark not ready so callers can reinitialize
+    this.isInitialized = false
   }
 
   // ── Reset ──────────────────────────────────────────────────────────────────
 
   reset(): void {
+    this._abortPending('reset')
     this.worker?.terminate()
     this.worker        = null
     this.isInitialized = false
-    this.isGenerating  = false
     this.activeBackend = null
     this.lastInitError = null
     this.lastRawError  = null
-    this.pendingResolve = null
   }
 
   // ── Cache clear ────────────────────────────────────────────────────────────
@@ -433,8 +472,17 @@ export class GenesisAI {
         { role: 'user',   content: this.describeState(worldState, playerAction, seed) },
       ]
 
-      const result = await new Promise<WorkerOutMessage>((resolve) => {
-        this.pendingResolve = resolve
+      const result = await new Promise<WorkerOutMessage>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          if (this.pending?.id === id) {
+            this.pending = null
+            this.isGenerating = false
+            reject(new Error('AI generation timed out'))
+          }
+        }, GENERATE_TIMEOUT_MS)
+
+        this.pending = { id, resolve, reject, timeout }
+
         const msg: WorkerInMessage = {
           type: 'generate',
           id,
@@ -460,6 +508,8 @@ export class GenesisAI {
       console.warn('AI generation error:', e)
       return null
     } finally {
+      // isGenerating is cleared by _onWorkerMessage / _abortPending / timeout;
+      // ensure it's always false on exit
       this.isGenerating = false
     }
   }
