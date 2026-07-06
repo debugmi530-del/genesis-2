@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import type { EntityData } from '../store/saveManager'
-import { getTerrainHeight } from './TerrainSystem'
+import { getTerrainHeightCached } from './TerrainSystem'
 
 interface LiveEntity {
   data: EntityData
@@ -31,7 +31,7 @@ export class EntityManager {
     const mesh = new THREE.Mesh(geometry, material)
     mesh.castShadow = true
 
-    let y = getTerrainHeight(data.position[0], data.position[2], this.seed) + size * 0.5
+    let y = getTerrainHeightCached(data.position[0], data.position[2], this.seed) + size * 0.5
     mesh.position.set(data.position[0], y, data.position[2])
 
     this.scene.add(mesh)
@@ -83,7 +83,7 @@ export class EntityManager {
         const speed = this.getSpeed(entity.data.behavior)
         entity.mesh.position.addScaledVector(direction, speed * delta)
         entity.mesh.lookAt(entity.targetPosition)
-        const groundY = getTerrainHeight(entity.mesh.position.x, entity.mesh.position.z, this.seed)
+        const groundY = getTerrainHeightCached(entity.mesh.position.x, entity.mesh.position.z, this.seed)
         entity.mesh.position.y = groundY + (entity.data.size || 1) * 0.5
       }
 
