@@ -16,6 +16,7 @@ export type AICommand =
 export type AIInitError =
   | 'webgpu_not_supported'
   | 'webgpu_no_adapter'
+  | 'gpu_shader_error'
   | 'network_error'
   | 'cache_error'
   | 'unknown'
@@ -168,14 +169,28 @@ export class GenesisAI {
       this.lastRawError = `[${name}] ${msg}`
       console.error('GenesisAI init error:', { name, message: msg, raw: e })
 
-      const isCache = name === 'QuotaExceededError' || msg.includes('QuotaExceeded') ||
-        msg.includes('quota') || msg.toLowerCase().includes('cache') ||
-        msg.includes('storage') || msg.includes('put')
-      const isNetwork = msg.includes('fetch') || msg.includes('network') ||
-        msg.includes('ERR_') || msg.includes('Failed to load') || msg.includes('NetworkError')
+      const isGPUShader =
+        name === 'GPUPipelineError' ||
+        msg.includes('ShaderModule') ||
+        msg.includes('compute stage') ||
+        msg.includes('GPUPipeline') ||
+        msg.includes('entryPoint') ||
+        msg.includes('index_kernel')
+      const isCache =
+        name === 'QuotaExceededError' ||
+        msg.includes('QuotaExceeded') ||
+        msg.includes('quota') ||
+        msg.includes('QUOTA_BYTES') ||
+        msg.includes('storage full')
+      const isNetwork =
+        msg.includes('fetch') ||
+        msg.includes('NetworkError') ||
+        msg.includes('ERR_') ||
+        msg.includes('Failed to load')
 
-      if (isCache) { this.lastInitError = 'cache_error'; throw new Error('cache_error') }
-      if (isNetwork) { this.lastInitError = 'network_error'; throw new Error('network_error') }
+      if (isGPUShader) { this.lastInitError = 'gpu_shader_error'; throw new Error('gpu_shader_error') }
+      if (isCache)     { this.lastInitError = 'cache_error';       throw new Error('cache_error') }
+      if (isNetwork)   { this.lastInitError = 'network_error';     throw new Error('network_error') }
       this.lastInitError = 'unknown'
       throw e
     }
