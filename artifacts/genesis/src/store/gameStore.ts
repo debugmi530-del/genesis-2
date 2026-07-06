@@ -1,5 +1,8 @@
 import { create } from 'zustand'
-import type { WorldSave, WorldState, EventEntry, EntityData, MechanicData, TerrainModification } from './saveManager'
+import type {
+  WorldSave, WorldState, EventEntry, EntityData, MechanicData,
+  TerrainModification, ItemData, EffectData, WorldRule,
+} from './saveManager'
 
 interface GameStore {
   currentWorld: WorldSave | null
@@ -21,6 +24,10 @@ interface GameStore {
   addMechanic: (mechanic: MechanicData) => void
   addTerrainMod: (mod: TerrainModification) => void
   addPlayerAbility: (ability: string) => void
+  addItem: (item: ItemData) => void
+  addEffect: (effect: EffectData) => void
+  removeEffect: (id: string) => void
+  setWorldRule: (rule: WorldRule) => void
   updateAiMemory: (memory: string) => void
   incrementGeneration: () => void
   updatePlayTime: (seconds: number) => void
@@ -121,13 +128,65 @@ export const useGameStore = create<GameStore>((set, get) => ({
   addPlayerAbility: (ability) =>
     set((state) => {
       if (!state.currentWorld) return state
-      // Avoid duplicates
       if (state.currentWorld.worldState.playerAbilities.includes(ability)) return state
       const playerAbilities = [...state.currentWorld.worldState.playerAbilities, ability]
       return {
         currentWorld: {
           ...state.currentWorld,
           worldState: { ...state.currentWorld.worldState, playerAbilities },
+        },
+      }
+    }),
+
+  addItem: (item) =>
+    set((state) => {
+      if (!state.currentWorld) return state
+      const playerItems = [...(state.currentWorld.worldState.playerItems ?? []), item]
+      return {
+        currentWorld: {
+          ...state.currentWorld,
+          worldState: { ...state.currentWorld.worldState, playerItems },
+        },
+      }
+    }),
+
+  addEffect: (effect) =>
+    set((state) => {
+      if (!state.currentWorld) return state
+      const playerEffects = [...(state.currentWorld.worldState.playerEffects ?? []), effect]
+      return {
+        currentWorld: {
+          ...state.currentWorld,
+          worldState: { ...state.currentWorld.worldState, playerEffects },
+        },
+      }
+    }),
+
+  removeEffect: (id) =>
+    set((state) => {
+      if (!state.currentWorld) return state
+      const playerEffects = (state.currentWorld.worldState.playerEffects ?? []).filter(
+        (e) => e.id !== id
+      )
+      return {
+        currentWorld: {
+          ...state.currentWorld,
+          worldState: { ...state.currentWorld.worldState, playerEffects },
+        },
+      }
+    }),
+
+  setWorldRule: (rule) =>
+    set((state) => {
+      if (!state.currentWorld) return state
+      const worldRules = [
+        ...(state.currentWorld.worldState.worldRules ?? []).filter((r) => r.name !== rule.name),
+        rule,
+      ]
+      return {
+        currentWorld: {
+          ...state.currentWorld,
+          worldState: { ...state.currentWorld.worldState, worldRules },
         },
       }
     }),
