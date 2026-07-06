@@ -37,7 +37,7 @@
     "vite": "catalog:"
   },
   "dependencies": {
-    "@mlc-ai/web-llm": "^0.2.78",
+    "@huggingface/transformers": "^3.5.2",
     "framer-motion": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",
