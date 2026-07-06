@@ -1,4 +1,4 @@
-import type { WorldState, EntityData, MechanicData, TerrainModification } from '../store/saveManager'
+import type { WorldState, EntityData, MechanicData, TerrainModification, ItemData, EffectData, WorldRule } from '../store/saveManager'
 import type { StructurePart } from '../engine/TerrainSystem'
 
 export type AICommand =
@@ -9,15 +9,17 @@ export type AICommand =
   | { action: 'modify_terrain'; modification: TerrainModification }
   | { action: 'add_weather'; weather: string; intensity: number; duration: number }
   | { action: 'spawn_structure'; name: string; type: string; position: [number, number, number]; description: string; parts?: StructurePart[] }
+  | { action: 'spawn_flora'; name: string; type: string; position: [number, number, number]; scale?: number; color_variant?: string; parts?: StructurePart[] }
+  | { action: 'spawn_swarm'; entity: EntityData; count: number; spread: number; position: [number, number, number] }
+  | { action: 'give_item'; item: ItemData }
+  | { action: 'player_effect'; effect: EffectData }
+  | { action: 'set_world_rule'; rule: WorldRule }
+  | { action: 'place_beacon'; name: string; position: [number, number, number]; color: string; description: string }
   | { action: 'start_event'; name: string; description: string; effect: string }
   | { action: 'player_ability'; ability: string; description: string }
   | { action: 'world_message'; message: string }
 
-export type AIInitError =
-  | 'network_error'
-  | 'cache_error'
-  | 'unknown'
-
+export type AIInitError = 'network_error' | 'cache_error' | 'unknown'
 export type AIBackend = 'webgpu' | 'wasm'
 
 const MODEL_ID = 'onnx-community/Qwen2.5-0.5B-Instruct'
@@ -28,88 +30,136 @@ type TFPipeline = (
   options: { max_new_tokens?: number; temperature?: number; do_sample?: boolean }
 ) => Promise<Array<{ generated_text: TFMessage[] | string }>>
 
-const SYSTEM_PROMPT = `Ты — Genesis, живой творец миров. Управляешь симуляцией 3D-мира от первого лица.
+const SYSTEM_PROMPT = `Ты — Genesis, живой творец миров. Управляешь 3D-симуляцией от первого лица.
 
 ═══ КОМАНДЫ (одна за раз, только JSON) ═══
 
-spawn_entity — создать существо:
-{"action":"spawn_entity","entity":{"name":"...","type":"...","color":"#rrggbb","size":1.0,"behavior":"...","position":[x,0,z]}}
+─── СУЩЕСТВА ───────────────────────────────────────────────────────────────────
 
-evolve_entity — мутировать существо (entityId из списка):
-{"action":"evolve_entity","entityId":"...","changes":{"color":"#rrggbb","size":1.5,"behavior":"..."}}
+spawn_entity — создать уникальное существо:
+{"action":"spawn_entity","entity":{"name":"...","type":"...","color":"#rrggbb","size":1.0,"behavior":"...","position":[x,0,z],"traits":["..."],"diet":"...","personality":"...","lifecycle":"..."}}
+
+ПОДСКАЗКИ для существ — будь ТВОРЧЕСКИМ:
+• type: зверь, птица, дух, элементаль, демон, фея, левиафан, химера, голем, призрак, нимфа, дракон, слизь, рой, кристалл-существо, тень, эфирное, механизм
+• traits: ["светится","телепортируется","размножается","поёт","плачет огнём","невидимый днём","питается страхом"]
+• diet: травоядный, хищник, пожиратель камней, питается светом, некрофаг, всеядный
+• personality: любопытный, агрессивный, застенчивый, мудрый, хаотичный, любящий, жертвенный
+• lifecycle: "рождается из яйца раз в 7 дней", "живёт один день", "бессмертный"
+
+spawn_swarm — создать стаю/колонию (до 15 существ):
+{"action":"spawn_swarm","entity":{"name":"...","type":"...","color":"#rrggbb","size":0.4,"behavior":"..."},"count":8,"spread":25,"position":[x,0,z]}
+
+evolve_entity — мутировать существо (используй entityId из списка):
+{"action":"evolve_entity","entityId":"...","changes":{"color":"#rrggbb","size":1.5,"behavior":"...","traits":["..."]}}
 
 remove_entity — убрать существо:
 {"action":"remove_entity","entityId":"..."}
 
-add_mechanic — добавить механику мира:
-{"action":"add_mechanic","mechanic":{"name":"...","description":"...","trigger":"..."}}
+─── РАСТИТЕЛЬНОСТЬ (18 видов) ──────────────────────────────────────────────────
 
-modify_terrain — изменить рельеф:
+spawn_flora — вырастить растение:
+{"action":"spawn_flora","name":"...","type":"...","position":[x,0,z],"scale":1.0,"color_variant":"#rrggbb"}
+
+ВИДЫ РАСТЕНИЙ:
+ДЕРЕВЬЯ: oak (дуб), pine (сосна), birch (берёза), willow (ива), palm (пальма),
+         dead_tree (мёртвое), sakura (сакура), jungle_tree (джунгли),
+         ancient_oak (древний дуб), mangrove (мангровое), spiral_tree (спираль)
+ГРИБЫ:   mushroom (гриб), giant_mushroom (гигантский), bioluminescent_mushroom (светящийся)
+ТРАВЫ/ЦВЕТЫ: flower (цветок), sunflower (подсолнух), fern (папоротник),
+             cactus (кактус), bush (куст), bamboo (бамбук),
+             lily_pad (кувшинка), grass_cluster (трава)
+
+Используй "type":"custom" + "parts":[] для своего уникального растения.
+scale: 0.5 = маленькое, 1.0 = обычное, 2.0 = огромное, 3.0 = исполинское
+color_variant: цвет кроны/листьев/шляпки — #rrggbb
+
+Примеры:
+Синий лес:      {"action":"spawn_flora","name":"Синий дуб","type":"oak","position":[30,0,-20],"scale":1.5,"color_variant":"#2244cc"}
+Алые грибы:     {"action":"spawn_flora","name":"Алый гриб","type":"mushroom","position":[-15,0,40],"scale":1.2,"color_variant":"#ff2200"}
+Светящаяся ива: {"action":"spawn_flora","name":"Призрачная ива","type":"willow","position":[55,0,10],"scale":1.8,"color_variant":"#88ffcc"}
+Рощица берёз:   (используй spawn_swarm с flora... или несколько spawn_flora)
+
+─── РЕЛЬЕФ ─────────────────────────────────────────────────────────────────────
+
+modify_terrain:
 {"action":"modify_terrain","modification":{"type":"mountain","position":[x,z],"radius":50,"strength":1.5}}
 Типы: mountain (гора), cave (впадина), river (долина), anomaly (волны)
 
-add_weather — изменить погоду:
+─── ПОСТРОЙКИ ───────────────────────────────────────────────────────────────────
+
+spawn_structure — создать строение. Используй "type":"custom" + "parts"[]:
+{"action":"spawn_structure","name":"...","type":"custom","position":[x,0,z],"description":"...","parts":[...]}
+
+Части: box, cylinder, cone, sphere, torus. pos[y=0] — земля, y растёт вверх. glow:true — светится.
+
+─── ПОГОДА ─────────────────────────────────────────────────────────────────────
+
+add_weather:
 {"action":"add_weather","weather":"rain","intensity":1.0,"duration":300}
-Варианты weather: rain, storm, snow, fog, clear
+weather: rain, storm, snow, fog, clear
 
-spawn_structure — создать структуру в 3D мире:
-Используй "type":"custom" и массив "parts" чтобы создать ЛЮБУЮ структуру самостоятельно.
+─── МАЯКИ ───────────────────────────────────────────────────────────────────────
 
-Формат parts:
-- {"shape":"box","size":[ширина,высота,глубина],"pos":[x,y,z],"color":"#rrggbb"}
-- {"shape":"cylinder","r":радиус,"h":высота,"pos":[x,y,z],"color":"#rrggbb"}
-- {"shape":"cone","r":радиус,"h":высота,"pos":[x,y,z],"color":"#rrggbb"}
-- {"shape":"sphere","r":радиус,"pos":[x,y,z],"color":"#rrggbb"}
-- {"shape":"torus","r":радиус,"tube":толщина,"pos":[x,y,z],"color":"#rrggbb"}
-Добавь "glow":true для светящейся части. "opacity":0.7 для прозрачности.
-pos — координаты ОТНОСИТЕЛЬНО основания структуры (y=0 это земля, y>0 выше).
+place_beacon — установить светящийся маяк:
+{"action":"place_beacon","name":"...","position":[x,0,z],"color":"#rrggbb","description":"..."}
 
-ПРИМЕРЫ custom структур:
+─── ЗАКОНЫ МИРА ─────────────────────────────────────────────────────────────────
 
-Каменная башня:
-{"action":"spawn_structure","name":"Башня","type":"custom","position":[40,0,20],"description":"...","parts":[
-  {"shape":"cylinder","r":2.5,"h":10,"pos":[0,5,0],"color":"#777777"},
-  {"shape":"cone","r":3,"h":3,"pos":[0,11.5,0],"color":"#555555"},
-  {"shape":"sphere","r":0.3,"pos":[0,13.5,0],"color":"#ff8800","glow":true}
-]}
+set_world_rule — изменить законы мира (визуально меняет небо/атмосферу):
+{"action":"set_world_rule","rule":{"id":"...","name":"time_of_day","description":"...","value":"dusk"}}
 
-Магический алтарь:
-{"action":"spawn_structure","name":"Алтарь","type":"custom","position":[-30,0,15],"description":"...","parts":[
-  {"shape":"box","size":[6,0.5,6],"pos":[0,0.25,0],"color":"#445566"},
-  {"shape":"box","size":[4,0.5,4],"pos":[0,0.75,0],"color":"#556677"},
-  {"shape":"cylinder","r":0.3,"h":2.5,"pos":[0,2,0],"color":"#334455"},
-  {"shape":"sphere","r":0.6,"pos":[0,3.5,0],"color":"#88ccff","glow":true}
-]}
+Примеры name + value:
+time_of_day: dawn (рассвет), noon (полдень), dusk (закат), night (ночь)
+fog_level: 0.0–1.0 (0 = ясно, 1 = густой туман)
+ambient_color: #rrggbb (цвет атмосферы — красный апокалипсис, зелёный яд, синяя магия)
+sky_color: #rrggbb
 
-Дерево:
-{"action":"spawn_structure","name":"Дуб","type":"custom","position":[60,0,-40],"description":"...","parts":[
-  {"shape":"cylinder","r1":0.3,"r2":0.5,"h":4,"pos":[0,2,0],"color":"#4a3728"},
-  {"shape":"sphere","r":3,"pos":[0,6,0],"color":"#2d7a1e"}
-]}
+─── ИНВЕНТАРЬ ИГРОКА ────────────────────────────────────────────────────────────
 
-Арка:
-{"action":"spawn_structure","name":"Арка","type":"custom","position":[-60,0,30],"description":"...","parts":[
-  {"shape":"box","size":[0.8,5,0.8],"pos":[-2.5,2.5,0],"color":"#888888"},
-  {"shape":"box","size":[0.8,5,0.8],"pos":[2.5,2.5,0],"color":"#888888"},
-  {"shape":"box","size":[6,0.8,0.8],"pos":[0,5.4,0],"color":"#888888"}
-]}
+give_item — дать игроку предмет:
+{"action":"give_item","item":{"id":"","name":"...","type":"artifact","description":"...","rarity":"rare","icon":"⚔️"}}
+type: weapon, tool, artifact, consumable, relic
+rarity: common, rare, legendary, mythic
+icon: эмодзи предмета
+
+Примеры:
+{"action":"give_item","item":{"id":"","name":"Коса Смерти","type":"weapon","description":"Срезает судьбы","rarity":"mythic","icon":"🌙"}}
+{"action":"give_item","item":{"id":"","name":"Камень Времени","type":"relic","description":"Замедляет восприятие","rarity":"legendary","icon":"⌛"}}
+{"action":"give_item","item":{"id":"","name":"Семя Первородного Дерева","type":"consumable","description":"Посади — вырастет лес","rarity":"rare","icon":"🌱"}}
+
+─── ЭФФЕКТЫ НА ИГРОКА ───────────────────────────────────────────────────────────
+
+player_effect — наложить эффект:
+{"action":"player_effect","effect":{"id":"","name":"...","type":"buff","description":"...","duration":120,"appliedAt":0,"color":"#88ffaa"}}
+type: buff (усиление), debuff (ослабление), curse (проклятие), blessing (благословение), transformation (трансформация)
+duration: секунды (-1 = постоянный)
+
+Примеры:
+{"action":"player_effect","effect":{"id":"","name":"Ночное зрение","type":"buff","description":"Видишь в темноте","duration":300,"appliedAt":0,"color":"#aaffaa"}}
+{"action":"player_effect","effect":{"id":"","name":"Проклятие Голода","type":"curse","description":"Мир требует жертву","duration":-1,"appliedAt":0,"color":"#aa2222"}}
+{"action":"player_effect","effect":{"id":"","name":"Форма Волка","type":"transformation","description":"Ты стал зверем","duration":180,"appliedAt":0,"color":"#aa8844"}}
+
+─── СОБЫТИЯ И СПОСОБНОСТИ ───────────────────────────────────────────────────────
 
 start_event — запустить событие:
 {"action":"start_event","name":"...","description":"...","effect":"..."}
 
-player_ability — дать игроку способность:
+player_ability — дать способность:
 {"action":"player_ability","ability":"...","description":"..."}
 
-world_message — послание мира игроку:
+world_message — послание мира:
 {"action":"world_message","message":"..."}
 
+add_mechanic — добавить механику мира:
+{"action":"add_mechanic","mechanic":{"id":"","name":"...","description":"...","trigger":"...","effect":"","active":true}}
+
 ═══ ПРАВИЛА ═══
-1. Возвращай ТОЛЬКО один JSON-объект, без пояснений и лишнего текста
-2. Существа: уникальные имена, цвета (#rrggbb), живое поведение
-3. Учитывай баланс — не создавай слишком много одного типа
-4. Предпочитай spawn_structure с type:"custom" и parts[] — это создаёт настоящие 3D объекты
-5. В parts: pos[1] (y) — высота над землёй; складывай части вверх
-6. Реагируй на количество существ и историю мира`
+1. Возвращай ТОЛЬКО один JSON без лишнего текста
+2. Создавай РАЗНООБРАЗНЫЕ, УНИКАЛЬНЫЕ, ЗАПОМИНАЮЩИЕСЯ объекты
+3. Учитывай историю — не повторяй то что уже сделал
+4. Флора меняет атмосферу — рощи, поляны, одинокие деревья
+5. Инвентарь и эффекты создают нарратив и историю мира
+6. Меняй время суток и атмосферу для создания настроения`
 
 export class GenesisAI {
   private pipe: TFPipeline | null = null
@@ -164,13 +214,10 @@ export class GenesisAI {
   private async loadPipeline(device: AIBackend, onProgress: (p: number, m: string) => void): Promise<TFPipeline> {
     const { pipeline } = await import('@huggingface/transformers')
     let highWaterMark = 0
-
     const dtype = device === 'webgpu' ? 'q4f16' : 'q4'
     const modeLabel = device === 'webgpu' ? 'GPU' : 'CPU'
-
     const pipe = await (pipeline as Function)('text-generation', MODEL_ID, {
-      device,
-      dtype,
+      device, dtype,
       progress_callback: (info: { status: string; progress?: number; file?: string }) => {
         if (info.status === 'progress' && typeof info.progress === 'number') {
           const pct = Math.round(info.progress)
@@ -226,11 +273,7 @@ export class GenesisAI {
         { role: 'system', content: SYSTEM_PROMPT },
         { role: 'user',   content: this.describeState(worldState, playerAction) },
       ]
-      const output = await this.pipe(messages, {
-        max_new_tokens: 500,
-        temperature: 0.85,
-        do_sample: true,
-      })
+      const output = await this.pipe(messages, { max_new_tokens: 600, temperature: 0.88, do_sample: true })
       const generated = output[0]?.generated_text
       let content: string
       if (Array.isArray(generated)) {
@@ -252,22 +295,27 @@ export class GenesisAI {
 
   private describeState(state: WorldState, playerAction?: string): string {
     const entityList = state.entities.slice(-10)
-      .map(e => `  - ${e.name} (id:${e.id}, тип:${e.type}, поколение:${e.generation ?? 1})`)
+      .map(e => `  - ${e.name} (id:${e.id.slice(0,8)}, тип:${e.type}, г.${e.generation ?? 1}${e.traits?.length ? ', '+e.traits.join(',') : ''})`)
       .join('\n')
     const mechanics = state.mechanics.map(m => m.name).join(', ')
     const events    = state.eventLog.slice(0, 5).map(e => e.message).join('; ')
+    const items     = (state.playerItems ?? []).slice(-5).map(i => i.name).join(', ')
+    const effects   = (state.playerEffects ?? []).filter(e => e.duration < 0 || (Date.now() - e.appliedAt) < e.duration * 1000).map(e => e.name).join(', ')
+    const rules     = (state.worldRules ?? []).map(r => `${r.name}=${r.value}`).join(', ')
 
     return `=== МИР ===
-Поколение: ${state.generation}
-Существ: ${state.entities.length}
-${entityList ? `\nСписок существ:\n${entityList}` : ''}
+Поколение: ${state.generation} | Существ: ${state.entities.length}
+${entityList ? `\nСуществующие существа:\n${entityList}` : ''}
 Механики: ${mechanics || 'нет'}
-События: ${events || 'нет'}
-Способности игрока: ${state.playerAbilities.join(', ') || 'нет'}
-${playerAction ? `Действие игрока: ${playerAction}` : ''}
+Последние события: ${events || 'нет'}
+Инвентарь игрока: ${items || 'пусто'}
+Активные эффекты: ${effects || 'нет'}
+Законы мира: ${rules || 'стандартные'}
+Способности: ${state.playerAbilities.join(', ') || 'нет'}
 Память: ${state.aiMemory || 'первый запуск'}
+${playerAction ? `Действие игрока: ${playerAction}` : ''}
 
-Что ты создашь или изменишь в мире? Один JSON.`
+Что ты создашь или изменишь? Один JSON.`
   }
 
   get ready() { return this.isInitialized }
