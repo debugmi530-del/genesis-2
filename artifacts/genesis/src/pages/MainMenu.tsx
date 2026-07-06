@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { saveManager, type WorldSave } from '../store/saveManager'
 import { genesisAI, GenesisAI } from '../ai/GenesisAI'
+import { exportModel, importModel, getModelCacheSize, formatBytes, type StorageProgress } from '../ai/ModelStorage'
 import { useGameStore } from '../store/gameStore'
 
 interface Props {
@@ -51,7 +52,21 @@ export default function MainMenu({ onEnterWorld }: Props) {
   const progressRef = useRef(0)
   const phaseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // ── Model storage (export / import) ──────────────────────────────────────
+  type StorageOp = 'export' | 'import' | null
+  const [storageOp, setStorageOp]         = useState<StorageOp>(null)
+  const [storageProgress, setStorageProgress] = useState<StorageProgress | null>(null)
+  const [storageError, setStorageError]   = useState<string | null>(null)
+  const [storageDone, setStorageDone]     = useState(false)
+  const [modelCacheSize, setModelCacheSize] = useState(0)
+  const importInputRef = useRef<HTMLInputElement>(null)
+
   const { setCurrentWorld, setAiReady } = useGameStore()
+
+  // Refresh cache size badge whenever model status changes
+  useEffect(() => {
+    getModelCacheSize().then(setModelCacheSize).catch(() => setModelCacheSize(0))
+  }, [aiStatus])
 
   const stars = useMemo(
     () =>
@@ -174,6 +189,51 @@ export default function MainMenu({ onEnterWorld }: Props) {
       setConfirmFullReset(false)
     }
     window.location.reload()
+  }
+
+  // ── Storage handlers ─────────────────────────────────────────────────────
+
+  function openStorageModal(op: 'export' | 'import') {
+    setStorageOp(op)
+    setStorageProgress(null)
+    setStorageError(null)
+    setStorageDone(false)
+  }
+
+  function closeStorageModal() {
+    setStorageOp(null)
+    setStorageProgress(null)
+    setStorageError(null)
+    setStorageDone(false)
+  }
+
+  async function handleExport() {
+    openStorageModal('export')
+    try {
+      await exportModel((p) => setStorageProgress(p))
+      setStorageDone(true)
+    } catch (e) {
+      setStorageError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  async function handleImportFileSelected(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    e.target.value = ''  // reset so same file can be re-selected
+    openStorageModal('import')
+    try {
+      await importModel(file, (p) => setStorageProgress(p))
+      setStorageDone(true)
+      // Re-init AI from the freshly restored cache
+      genesisAI.reset()
+      setAiReady(false)
+      setPhase('loading')
+      closeStorageModal()
+      initAI()
+    } catch (e) {
+      setStorageError(e instanceof Error ? e.message : String(e))
+    }
   }
 
   async function handleNewWorld() {
@@ -319,6 +379,24 @@ export default function MainMenu({ onEnterWorld }: Props) {
                   </motion.div>
                 )}
               </AnimatePresence>
+
+              {/* ─── Import button (visible 2 s after load starts) ─── */}
+              {phase === 'loading' && (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ delay: 2 }}
+                  className="relative z-10 flex flex-col items-center gap-1"
+                >
+                  <button
+                    onClick={() => importInputRef.current?.click()}
+                    className="text-xs text-zinc-600 hover:text-zinc-400 border border-zinc-800/60 hover:border-zinc-600 rounded-lg px-4 py-2 transition-all"
+                  >
+                    📂 Загрузить из сохранённого файла
+                  </button>
+                  <span className="text-zinc-800 text-[10px]">если уже сохраняли модель раньше</span>
+                </motion.div>
+              )}
             </div>
           </motion.div>
         )}
@@ -512,29 +590,46 @@ export default function MainMenu({ onEnterWorld }: Props) {
                 )}
               </motion.div>
 
-              {/* AI mode badge + cache reset — only shown when AI loaded successfully */}
+              {/* AI mode badge + save/reset — only shown when AI loaded successfully */}
               {aiStatus === 'ready' && (
                 <motion.div
-                  className="flex items-center justify-between w-full"
+                  className="flex flex-col gap-2 w-full"
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   transition={{ delay: 0.5 }}
                 >
-                  <div className="flex items-center gap-2">
-                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                    <span className="text-xs text-zinc-600">ИИ готов</span>
-                    {genesisAI.activeBackend === 'wasm' && (
-                      <span className="text-xs text-yellow-500 bg-yellow-900/20 border border-yellow-800/30 rounded px-1.5 py-0.5">
-                        CPU режим
-                      </span>
-                    )}
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                      <span className="text-xs text-zinc-600">ИИ готов</span>
+                      {modelCacheSize > 0 && (
+                        <span className="text-zinc-700 text-xs">{formatBytes(modelCacheSize)}</span>
+                      )}
+                      {genesisAI.activeBackend === 'wasm' && (
+                        <span className="text-xs text-yellow-500 bg-yellow-900/20 border border-yellow-800/30 rounded px-1.5 py-0.5">
+                          CPU режим
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      onClick={handleResetAI}
+                      disabled={resettingAI}
+                      className="text-xs text-zinc-700 hover:text-zinc-400 transition-colors disabled:opacity-40"
+                    >
+                      {resettingAI ? 'Удаление...' : '↻ Сбросить кэш'}
+                    </button>
                   </div>
+
+                  {/* Save model button */}
                   <button
-                    onClick={handleResetAI}
-                    disabled={resettingAI}
-                    className="text-xs text-zinc-700 hover:text-zinc-400 transition-colors disabled:opacity-40"
+                    onClick={handleExport}
+                    className="w-full py-2.5 rounded-xl border border-zinc-800/60 hover:border-zinc-600 bg-zinc-900/30 hover:bg-zinc-800/40 text-zinc-500 hover:text-zinc-300 text-xs tracking-wide transition-all flex items-center justify-center gap-2"
                   >
-                    {resettingAI ? 'Удаление...' : '↻ Сбросить кэш'}
+                    <span>💾</span>
+                    <span>Сохранить модель на диск</span>
+                    {modelCacheSize > 0 && (
+                      <span className="text-zinc-700">· {formatBytes(modelCacheSize)}</span>
+                    )}
                   </button>
                 </motion.div>
               )}
@@ -558,6 +653,106 @@ export default function MainMenu({ onEnterWorld }: Props) {
               </motion.div>
 
             </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Hidden file input for model import ── */}
+      <input
+        ref={importInputRef}
+        type="file"
+        accept=".zip"
+        className="hidden"
+        onChange={handleImportFileSelected}
+      />
+
+      {/* ── Storage operation progress modal (export / import) ── */}
+      <AnimatePresence>
+        {storageOp !== null && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 bg-black/85 backdrop-blur-sm flex items-center justify-center z-50"
+          >
+            <motion.div
+              initial={{ scale: 0.92, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.92, opacity: 0 }}
+              className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 w-80 flex flex-col gap-4 mx-4"
+            >
+              <div className="text-white text-sm font-medium">
+                {storageOp === 'export' ? '💾 Сохранение модели' : '📂 Загрузка из файла'}
+              </div>
+
+              {/* Progress bar */}
+              {!storageError && (
+                <div className="flex flex-col gap-2">
+                  <div className="relative w-full h-[5px] bg-zinc-800 rounded-full overflow-hidden">
+                    <motion.div
+                      className="absolute left-0 top-0 h-full rounded-full bg-emerald-500"
+                      animate={{
+                        width: storageDone
+                          ? '100%'
+                          : storageProgress && storageProgress.total > 0
+                          ? `${Math.round((storageProgress.current / storageProgress.total) * 100)}%`
+                          : '4%',
+                        backgroundColor: storageDone ? '#34d399' : '#10b981',
+                      }}
+                      transition={{ width: { duration: 0.3 } }}
+                    />
+                    {!storageDone && (
+                      <div
+                        className="absolute top-0 h-full w-10 bg-gradient-to-r from-transparent via-white/20 to-transparent"
+                        style={{ animation: 'shimmer 1.8s ease-in-out infinite', left: '-40px' }}
+                      />
+                    )}
+                  </div>
+                  <div className="text-zinc-500 text-xs truncate">
+                    {storageDone
+                      ? (storageOp === 'export' ? 'Файл скачан — проверьте папку загрузок' : 'Готово, ИИ переинициализируется…')
+                      : storageProgress?.step ?? (storageOp === 'export' ? 'Подготовка…' : 'Чтение файла…')}
+                  </div>
+                  {storageProgress && storageProgress.total > 0 && !storageDone && (
+                    <div className="text-zinc-700 text-xs">
+                      {storageProgress.current} / {storageProgress.total}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Error */}
+              {storageError && (
+                <div className="bg-red-950/40 border border-red-900/40 rounded-lg px-3 py-2 text-red-400 text-xs leading-relaxed whitespace-pre-line">
+                  {storageError}
+                </div>
+              )}
+
+              {/* Actions */}
+              <div className="flex gap-2">
+                {storageDone && (
+                  <button
+                    onClick={closeStorageModal}
+                    className="flex-1 py-2 rounded-lg bg-emerald-900/50 hover:bg-emerald-800/50 text-emerald-300 text-sm transition-colors"
+                  >
+                    ОК
+                  </button>
+                )}
+                {(storageError || storageDone) && (
+                  <button
+                    onClick={closeStorageModal}
+                    className="flex-1 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-400 text-sm transition-colors"
+                  >
+                    Закрыть
+                  </button>
+                )}
+                {!storageDone && !storageError && (
+                  <div className="flex-1 py-2 rounded-lg bg-zinc-800/40 text-zinc-600 text-sm text-center select-none">
+                    {storageOp === 'export' ? 'Упаковка…' : 'Восстановление…'}
+                  </div>
+                )}
+              </div>
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
