@@ -2,7 +2,7 @@ import * as THREE from 'three'
 import { FirstPersonController } from './FirstPersonController'
 import { EntityManager } from './EntityManager'
 import {
-  createTerrain, createSky, getTerrainHeight,
+  createTerrain, createSky, getTerrainHeightCached,
   addTerrainMod, rebuildTerrainMesh, createStructureMesh, createFloraMesh, clearTerrainMods,
 } from './TerrainSystem'
 import type { StructurePart } from './TerrainSystem'
@@ -72,7 +72,7 @@ export class GameEngine {
 
     this.camera = new THREE.PerspectiveCamera(75, canvas.clientWidth / canvas.clientHeight, 0.1, 3000)
     const startX = 0, startZ = 0
-    this.camera.position.set(startX, getTerrainHeight(startX, startZ, this.seed) + 1.7, startZ)
+    this.camera.position.set(startX, getTerrainHeightCached(startX, startZ, this.seed) + 1.7, startZ)
 
     this.controller = new FirstPersonController(this.camera, canvas)
     this.entityManager = new EntityManager(this.scene, this.seed)
@@ -175,7 +175,7 @@ export class GameEngine {
 
   spawnStructure(name: string, type: string, position: [number, number, number], parts?: StructurePart[]): void {
     const group = createStructureMesh(type, parts)
-    const groundY = getTerrainHeight(position[0], position[2], this.seed)
+    const groundY = getTerrainHeightCached(position[0], position[2], this.seed)
     group.position.set(position[0], groundY, position[2])
     group.name = `structure_${name}`
     this.scene.add(group)
@@ -185,7 +185,7 @@ export class GameEngine {
 
   spawnFlora(name: string, type: string, position: [number, number, number], parts?: StructurePart[], scale = 1.0, colorVariant?: string): void {
     const group = createFloraMesh(type, parts, scale, colorVariant)
-    const groundY = getTerrainHeight(position[0], position[2], this.seed)
+    const groundY = getTerrainHeightCached(position[0], position[2], this.seed)
     group.position.set(position[0], groundY, position[2])
     group.rotation.y = Math.random() * Math.PI * 2
     group.name = `flora_${name}`
@@ -215,7 +215,7 @@ export class GameEngine {
     const light = new THREE.PointLight(col, 4, 50)
     light.position.y = 10.5
     group.add(base, pillar, orb, light)
-    const groundY = getTerrainHeight(position[0], position[2], this.seed)
+    const groundY = getTerrainHeightCached(position[0], position[2], this.seed)
     group.position.set(position[0], groundY, position[2])
     group.name = `beacon_${name}`
     this.scene.add(group)
@@ -261,7 +261,7 @@ export class GameEngine {
   private loop = (): void => {
     this.animationId = requestAnimationFrame(this.loop)
     const delta = Math.min(this.clock.getDelta(), 0.05)
-    this.controller.update(delta, (x, z) => getTerrainHeight(x, z, this.seed))
+    this.controller.update(delta, (x, z) => getTerrainHeightCached(x, z, this.seed))
     this.entityManager.update(delta, this.camera.position)
     this.updateRain(delta)
     this.renderer.render(this.scene, this.camera)
