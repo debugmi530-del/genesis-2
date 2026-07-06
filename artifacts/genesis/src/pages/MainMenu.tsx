@@ -161,11 +161,18 @@ export default function MainMenu({ onEnterWorld }: Props) {
 
   function getAiErrorText(): string {
     const err = genesisAI.lastInitError
-    if (err === 'webgpu_not_supported') return 'WebGPU недоступен — обновите драйверы видеокарты или запустите игру заново'
-    if (err === 'webgpu_no_adapter') return 'Видеокарта не поддерживает WebGPU — нужна DirectX 12 совместимая GPU'
-    if (err === 'network_error') return 'Ошибка сети при загрузке модели — проверьте интернет и перезапустите'
-    if (err === 'cache_error') return 'Ошибка кэша браузера — нажмите «Удалить кэш и перескачать» ниже'
-    return 'Ошибка ИИ — удалите кэш и попробуйте снова'
+    if (err === 'webgpu_not_supported') return 'WebGPU недоступен — попробуйте Chrome или Edge и обновите браузер'
+    if (err === 'webgpu_no_adapter')    return 'Видеокарта не найдена или не поддерживает WebGPU — нужна DirectX 12 / Vulkan совместимая GPU'
+    if (err === 'gpu_shader_error')     return 'GPU не может запустить шейдеры модели ИИ — обновите драйверы видеокарты или браузер. Иногда помогает перезапуск браузера'
+    if (err === 'network_error')        return 'Ошибка сети — проверьте интернет и нажмите «Повторить загрузку»'
+    if (err === 'cache_error')          return 'Переполнен кэш браузера — нажмите «Удалить кэш и перескачать»'
+    return 'Неизвестная ошибка ИИ — посмотрите детали ниже и попробуйте повторить'
+  }
+
+  function getAiErrorButtons(): 'retry_and_cache' | 'retry_only' {
+    const err = genesisAI.lastInitError
+    if (err === 'gpu_shader_error' || err === 'webgpu_not_supported' || err === 'webgpu_no_adapter') return 'retry_only'
+    return 'retry_and_cache'
   }
 
   async function handleNewWorld() {
@@ -313,13 +320,15 @@ export default function MainMenu({ onEnterWorld }: Props) {
                   >
                     ↻ Повторить загрузку
                   </button>
-                  <button
-                    onClick={handleResetAI}
-                    disabled={resettingAI}
-                    className="text-xs text-orange-300 bg-orange-900/30 hover:bg-orange-800/40 border border-orange-800/50 rounded px-3 py-1.5 transition-colors disabled:opacity-40"
-                  >
-                    {resettingAI ? 'Удаление...' : 'Удалить кэш и перескачать'}
-                  </button>
+                  {getAiErrorButtons() === 'retry_and_cache' && (
+                    <button
+                      onClick={handleResetAI}
+                      disabled={resettingAI}
+                      className="text-xs text-orange-300 bg-orange-900/30 hover:bg-orange-800/40 border border-orange-800/50 rounded px-3 py-1.5 transition-colors disabled:opacity-40"
+                    >
+                      {resettingAI ? 'Удаление...' : 'Удалить кэш и перескачать'}
+                    </button>
+                  )}
                 </div>
               </div>
             )}
