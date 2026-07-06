@@ -31,6 +31,12 @@ export type AIBackend = 'webgpu' | 'wasm'
 
 const MODEL_ID = 'onnx-community/Qwen2.5-Coder-3B-Instruct'
 
+function formatBytes(bytes: number): string {
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)}КБ`
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(0)}МБ`
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)}ГБ`
+}
+
 type TFMessage = { role: string; content: string }
 type TFPipeline = (
   messages: TFMessage[],
@@ -373,16 +379,30 @@ export class GenesisAI {
   private async loadPipeline(device: AIBackend, onProgress: (p: number, m: string) => void): Promise<TFPipeline> {
     const { pipeline } = await import('@huggingface/transformers')
     let highWaterMark = 0
+    const fileBytes = new Map<string, { loaded: number; total: number }>()
     const dtype = device === 'webgpu' ? 'q4f16' : 'q4'
     const modeLabel = device === 'webgpu' ? 'GPU' : 'CPU'
     const pipe = await (pipeline as Function)('text-generation', MODEL_ID, {
       device, dtype,
-      progress_callback: (info: { status: string; progress?: number; file?: string }) => {
+      progress_callback: (info: { status: string; progress?: number; file?: string; loaded?: number; total?: number }) => {
         if (info.status === 'progress' && typeof info.progress === 'number') {
           const pct = Math.round(info.progress)
           if (pct > highWaterMark) highWaterMark = pct
           const file = info.file?.split('/').pop() ?? ''
-          onProgress(highWaterMark, `[${modeLabel}] ${file} — ${pct}%`)
+
+          if (info.file && typeof info.loaded === 'number' && typeof info.total === 'number') {
+            fileBytes.set(info.file, { loaded: info.loaded, total: info.total })
+          }
+
+          let totalLoaded = 0
+          let totalSize = 0
+          for (const { loaded, total } of fileBytes.values()) {
+            totalLoaded += loaded
+            totalSize += total
+          }
+
+          const sizeSuffix = totalSize > 0 ? ` (${formatBytes(totalLoaded)}/${formatBytes(totalSize)})` : ''
+          onProgress(highWaterMark, `[${modeLabel}] ${file} — ${pct}%${sizeSuffix}`)
         } else if (info.status === 'ready') {
           onProgress(100, `[${modeLabel}] Модель готова`)
         }
