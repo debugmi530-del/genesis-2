@@ -52,7 +52,7 @@ const activeMods: TerrainModification[] = []
 const _heightCache = new Map<string, number>()
 
 export function getTerrainHeightCached(x: number, z: number, seed: number): number {
-  const key = `${Math.round(x * 2)}_${Math.round(z * 2)}`
+  const key = `${seed}_${Math.round(x * 2)}_${Math.round(z * 2)}`
   if (_heightCache.has(key)) return _heightCache.get(key)!
   const h = getTerrainHeight(x, z, seed)
   _heightCache.set(key, h)

@@ -281,10 +281,12 @@ export default function GameView({ onExit }: Props) {
     engine.start()
     aiIntervalRef.current = setInterval(() => runAITickRef.current(), AI_INTERVAL_MS)
     saveIntervalRef.current = setInterval(async () => {
-      const latestWorld = useGameStore.getState().currentWorld
-      if (latestWorld) {
+      if (useGameStore.getState().currentWorld) {
         updatePlayTime(30)
-        await saveManager.saveWorld({ ...latestWorld, lastPlayedAt: Date.now() }).catch(() => {})
+        const latestWorld = useGameStore.getState().currentWorld
+        if (latestWorld) {
+          await saveManager.saveWorld({ ...latestWorld, lastPlayedAt: Date.now() }).catch(() => {})
+        }
       }
     }, 30_000)
     if (aiReady) setTimeout(() => runAITickRef.current(), 3000)

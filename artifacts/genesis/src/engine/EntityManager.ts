@@ -62,6 +62,9 @@ export class EntityManager {
     if (!entity) return
     this.scene.remove(entity.mesh)
     if (entity.hasParts) {
+      // Materials for part-based entities come from a shared cache (getCachedMat in
+      // TerrainSystem.ts) and may be reused by other live entities/flora/structures,
+      // so only dispose the per-mesh geometry here, never the shared material.
       entity.mesh.traverse(child => {
         if (child instanceof THREE.Mesh) child.geometry.dispose()
       })
@@ -82,7 +85,7 @@ export class EntityManager {
           ((entity.mesh as THREE.Mesh).material as THREE.MeshLambertMaterial).color.set(updates.color)
       }
     }
-    if (updates.size) {
+    if (updates.size && entity.originalSize > 0) {
       entity.mesh.scale.setScalar(updates.size / entity.originalSize)
     }
     entity.data = { ...entity.data, ...updates }
@@ -131,7 +134,7 @@ export class EntityManager {
       const dist = 5 + Math.random() * 20
       entity.targetPosition = new THREE.Vector3(
         pos.x + Math.cos(angle) * dist,
-        0,
+        pos.y,
         pos.z + Math.sin(angle) * dist
       )
     }
