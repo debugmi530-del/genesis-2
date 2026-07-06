@@ -37,6 +37,9 @@ export interface EntityData {
   personality?: string
   lifecycle?: string
   special?: string
+  // Custom 3D body — same parts[] system as flora/structures.
+  // When present, the entity is rendered from these parts instead of a generic box.
+  parts?: unknown[]
 }
 
 export interface MechanicData {
