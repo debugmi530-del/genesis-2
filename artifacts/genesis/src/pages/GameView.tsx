@@ -203,6 +203,46 @@ export default function GameView({ onExit }: Props) {
           break
         }
 
+        case 'spawn_scene': {
+          const { name: sceneName, description: sceneDesc, center, objects } = command
+          if (!Array.isArray(objects) || objects.length === 0) break
+          const cx = center?.[0] ?? (Math.random() - 0.5) * 100
+          const cz = center?.[2] ?? (Math.random() - 0.5) * 100
+          let spawned = 0
+          for (const obj of objects) {
+            const px = cx + (obj.offset?.[0] ?? 0)
+            const pz = cz + (obj.offset?.[2] ?? 0)
+            const pos: [number, number, number] = [px, 0, pz]
+            if (obj.kind === 'flora') {
+              engineRef.current?.spawnFlora(obj.name, obj.type ?? 'custom', pos, obj.parts as never, obj.scale ?? 1.0, obj.color_variant)
+              spawned++
+            } else if (obj.kind === 'structure') {
+              engineRef.current?.spawnStructure(obj.name, obj.type ?? 'custom', pos, obj.parts as never)
+              spawned++
+            } else if (obj.kind === 'entity') {
+              const entity: EntityData = {
+                ...obj.entity,
+                id: crypto.randomUUID(),
+                position: pos,
+                generation: 1,
+                health: obj.entity.health ?? 100,
+                color: obj.entity.color ?? '#888888',
+                size: obj.entity.size ?? 1,
+              }
+              addEntity(entity)
+              engineRef.current?.spawnEntity(entity)
+              spawned++
+            } else if (obj.kind === 'beacon') {
+              engineRef.current?.placeBeacon(obj.name, pos, obj.color ?? '#88aaff')
+              spawned++
+            }
+          }
+          addEvent({ message: `🌐 Сцена: ${sceneName} — ${sceneDesc || ''} (${spawned} объектов)`, type: 'ai_create' })
+          setLastAiAction(`Сцена: ${sceneName}`)
+          incrementGeneration()
+          break
+        }
+
         case 'start_event': {
           addEvent({ message: `⚡ Событие: ${command.name} — ${command.description}`, type: 'world' })
           setLastAiAction(`Событие: ${command.name}`)
