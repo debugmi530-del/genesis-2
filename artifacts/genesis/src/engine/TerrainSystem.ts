@@ -162,6 +162,10 @@ export interface StructurePart {
   rotX?: number
   rotY?: number
   rotZ?: number
+  scaleX?: number
+  scaleY?: number
+  scaleZ?: number
+  segments?: number
 }
 
 function buildPartMesh(part: StructurePart): THREE.Object3D {
@@ -181,19 +185,19 @@ function buildPartMesh(part: StructurePart): THREE.Object3D {
     case 'cylinder': {
       const topR    = part.r1 ?? part.r ?? 0.5
       const bottomR = part.r2 ?? part.r ?? 0.5
-      geo = new THREE.CylinderGeometry(topR, bottomR, part.h ?? 1, 10)
+      geo = new THREE.CylinderGeometry(topR, bottomR, part.h ?? 1, part.segments ?? 10)
       break
     }
     case 'cone': {
-      geo = new THREE.ConeGeometry(part.r ?? 0.5, part.h ?? 1, 8)
+      geo = new THREE.ConeGeometry(part.r ?? 0.5, part.h ?? 1, part.segments ?? 8)
       break
     }
     case 'sphere': {
-      geo = new THREE.SphereGeometry(part.r ?? 0.5, 10, 8)
+      geo = new THREE.SphereGeometry(part.r ?? 0.5, part.segments ?? 10, part.segments ?? 8)
       break
     }
     case 'torus': {
-      geo = new THREE.TorusGeometry(part.r ?? 1, part.tube ?? 0.2, 8, 16)
+      geo = new THREE.TorusGeometry(part.r ?? 1, part.tube ?? 0.2, part.segments ?? 8, 16)
       break
     }
     default:
@@ -209,6 +213,10 @@ function buildPartMesh(part: StructurePart): THREE.Object3D {
   if (part.rotX) mesh.rotation.x = part.rotX
   if (part.rotY) mesh.rotation.y = part.rotY
   if (part.rotZ) mesh.rotation.z = part.rotZ
+
+  if (part.scaleX !== undefined) mesh.scale.x = part.scaleX
+  if (part.scaleY !== undefined) mesh.scale.y = part.scaleY
+  if (part.scaleZ !== undefined) mesh.scale.z = part.scaleZ
 
   if (part.glow) {
     const group = new THREE.Group()
