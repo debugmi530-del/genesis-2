@@ -55,6 +55,6 @@ export default defineConfig({
     allowedHosts: true,
   },
   optimizeDeps: {
-    exclude: ['@mlc-ai/web-llm'],
+    exclude: ['@huggingface/transformers'],
   },
 })
