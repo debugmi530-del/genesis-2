@@ -3,7 +3,7 @@ import { FirstPersonController } from './FirstPersonController'
 import { EntityManager } from './EntityManager'
 import {
   createTerrain, createSky, getTerrainHeight,
-  addTerrainMod, rebuildTerrainMesh, createStructureMesh,
+  addTerrainMod, rebuildTerrainMesh, createStructureMesh, clearTerrainMods,
 } from './TerrainSystem'
 import type { StructurePart } from './TerrainSystem'
 import type { WorldSave, TerrainModification } from '../store/saveManager'
@@ -59,8 +59,19 @@ export class GameEngine {
       if (c instanceof THREE.AmbientLight) this.ambientLight = c
     })
 
+    // Clear any leftover terrain mods from a previous session
+    clearTerrainMods()
+
     this.terrain = createTerrain(this.seed)
     this.scene.add(this.terrain)
+
+    // Re-apply saved terrain modifications from this world
+    if (world.worldState.terrain && world.worldState.terrain.length > 0) {
+      for (const mod of world.worldState.terrain) {
+        addTerrainMod(mod)
+      }
+      rebuildTerrainMesh(this.terrain, this.seed)
+    }
 
     this.camera = new THREE.PerspectiveCamera(75, canvas.clientWidth / canvas.clientHeight, 0.1, 3000)
     const startX = 0, startZ = 0
