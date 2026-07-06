@@ -1,0 +1,1 @@
+- [GenesisAI Worker Architecture](genesis-ai-worker.md) — LLM inference runs in a Web Worker; never call pipeline on the main thread.
