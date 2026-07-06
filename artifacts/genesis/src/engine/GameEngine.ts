@@ -3,7 +3,7 @@ import { FirstPersonController } from './FirstPersonController'
 import { EntityManager } from './EntityManager'
 import {
   createTerrain, createSky, getTerrainHeight,
-  addTerrainMod, rebuildTerrainMesh, createStructureMesh, clearTerrainMods,
+  addTerrainMod, rebuildTerrainMesh, createStructureMesh, createFloraMesh, clearTerrainMods,
 } from './TerrainSystem'
 import type { StructurePart } from './TerrainSystem'
 import type { WorldSave, TerrainModification } from '../store/saveManager'
@@ -38,6 +38,7 @@ export class GameEngine {
 
   private rainParticles: THREE.Points | null = null
   private ambientLight: THREE.AmbientLight | null = null
+  private sunLight: THREE.DirectionalLight | null = null
 
   constructor(canvas: HTMLCanvasElement, world: WorldSave, onPause?: () => void) {
     this.seed = world.seed
@@ -57,19 +58,15 @@ export class GameEngine {
 
     this.scene.children.forEach(c => {
       if (c instanceof THREE.AmbientLight) this.ambientLight = c
+      if (c instanceof THREE.DirectionalLight) this.sunLight = c
     })
 
-    // Clear any leftover terrain mods from a previous session
     clearTerrainMods()
-
     this.terrain = createTerrain(this.seed)
     this.scene.add(this.terrain)
 
-    // Re-apply saved terrain modifications from this world
     if (world.worldState.terrain && world.worldState.terrain.length > 0) {
-      for (const mod of world.worldState.terrain) {
-        addTerrainMod(mod)
-      }
+      for (const mod of world.worldState.terrain) addTerrainMod(mod)
       rebuildTerrainMesh(this.terrain, this.seed)
     }
 
@@ -80,6 +77,13 @@ export class GameEngine {
     this.controller = new FirstPersonController(this.camera, canvas)
     this.entityManager = new EntityManager(this.scene, this.seed)
     this.entityManager.spawnFromSavedData(world.worldState.entities)
+
+    // Re-apply world rules if any saved
+    if (world.worldState.worldRules) {
+      for (const rule of world.worldState.worldRules) {
+        this.setWorldRule(rule.name, rule.value)
+      }
+    }
 
     this.controller.enable(() => {}, () => {})
     window.addEventListener('resize', this.onResize)
@@ -104,27 +108,66 @@ export class GameEngine {
       this.rainParticles = createRainParticles(ci)
       this.scene.add(this.rainParticles)
       if (this.ambientLight) this.ambientLight.intensity = 0.7
-
     } else if (w.includes('storm') || w.includes('шторм') || w.includes('гроз')) {
       fog.density = 0.009
       this.rainParticles = createRainParticles(ci * 1.8, 0xaabbff, 0.18, 35)
       this.scene.add(this.rainParticles)
       if (this.ambientLight) this.ambientLight.intensity = 0.4
       this.scene.background = new THREE.Color(0x445566)
-
     } else if (w.includes('snow') || w.includes('снег')) {
       fog.density = 0.005 + ci * 0.001
       this.rainParticles = createRainParticles(ci * 0.6, 0xffffff, 0.35, 4)
       this.scene.add(this.rainParticles)
-
     } else if (w.includes('fog') || w.includes('туман')) {
       fog.density = 0.007 + ci * 0.005
       if (this.ambientLight) this.ambientLight.intensity = 0.8
-
     } else {
       fog.density = 0.003
       this.scene.background = new THREE.Color(0x87ceeb)
       if (this.ambientLight) this.ambientLight.intensity = 1.2
+    }
+  }
+
+  // ─── World rules ──────────────────────────────────────────────────────────
+
+  setWorldRule(name: string, value: string | number | boolean): void {
+    const n = String(name).toLowerCase()
+    const v = String(value).toLowerCase()
+    const fog = this.scene.fog as THREE.FogExp2
+
+    if (n.includes('time') || n.includes('время') || n.includes('day')) {
+      if (v.includes('dawn') || v.includes('рассвет')) {
+        this.scene.background = new THREE.Color(0xff8844)
+        fog.color.setHex(0xff9966); fog.density = 0.004
+        if (this.ambientLight) { this.ambientLight.color.setHex(0xffcc88); this.ambientLight.intensity = 0.65 }
+        if (this.sunLight) { this.sunLight.color.setHex(0xffaa66); this.sunLight.intensity = 1.0; this.sunLight.position.set(10, 30, 80) }
+      } else if (v.includes('noon') || v.includes('полдень')) {
+        this.scene.background = new THREE.Color(0x87ceeb)
+        fog.color.setHex(0xc9e8f5); fog.density = 0.003
+        if (this.ambientLight) { this.ambientLight.color.setHex(0xffffff); this.ambientLight.intensity = 1.2 }
+        if (this.sunLight) { this.sunLight.color.setHex(0xfff4d0); this.sunLight.intensity = 1.8; this.sunLight.position.set(80, 120, 60) }
+      } else if (v.includes('dusk') || v.includes('закат') || v.includes('evening')) {
+        this.scene.background = new THREE.Color(0xcc5533)
+        fog.color.setHex(0xcc7744); fog.density = 0.005
+        if (this.ambientLight) { this.ambientLight.color.setHex(0xff9966); this.ambientLight.intensity = 0.7 }
+        if (this.sunLight) { this.sunLight.color.setHex(0xff6633); this.sunLight.intensity = 0.9; this.sunLight.position.set(-80, 20, 60) }
+      } else if (v.includes('night') || v.includes('midnight') || v.includes('ночь')) {
+        this.scene.background = new THREE.Color(0x080818)
+        fog.color.setHex(0x080818); fog.density = 0.006
+        if (this.ambientLight) { this.ambientLight.color.setHex(0x4466aa); this.ambientLight.intensity = 0.2 }
+        if (this.sunLight) { this.sunLight.intensity = 0.05 }
+      }
+    } else if (n.includes('fog') || n.includes('туман')) {
+      const level = typeof value === 'number' ? value : parseFloat(v) || 0.5
+      fog.density = Math.max(0, Math.min(0.04, level * 0.02))
+    } else if (n.includes('ambient') || n.includes('атмосфер') || n.includes('color')) {
+      if (this.ambientLight && typeof value === 'string') {
+        try { this.ambientLight.color.set(value) } catch (_) {}
+      }
+    } else if (n.includes('sky') || n.includes('небо')) {
+      if (typeof value === 'string') {
+        try { this.scene.background = new THREE.Color(value) } catch (_) {}
+      }
     }
   }
 
@@ -135,6 +178,46 @@ export class GameEngine {
     const groundY = getTerrainHeight(position[0], position[2], this.seed)
     group.position.set(position[0], groundY, position[2])
     group.name = `structure_${name}`
+    this.scene.add(group)
+  }
+
+  // ─── Flora ────────────────────────────────────────────────────────────────
+
+  spawnFlora(name: string, type: string, position: [number, number, number], parts?: StructurePart[], scale = 1.0, colorVariant?: string): void {
+    const group = createFloraMesh(type, parts, scale, colorVariant)
+    const groundY = getTerrainHeight(position[0], position[2], this.seed)
+    group.position.set(position[0], groundY, position[2])
+    group.rotation.y = Math.random() * Math.PI * 2
+    group.name = `flora_${name}`
+    this.scene.add(group)
+  }
+
+  // ─── Beacon ───────────────────────────────────────────────────────────────
+
+  placeBeacon(name: string, position: [number, number, number], color: string): void {
+    const group = new THREE.Group()
+    const col = new THREE.Color(color || '#88aaff')
+    const pillar = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.12, 0.18, 10, 8),
+      new THREE.MeshLambertMaterial({ color: col, transparent: true, opacity: 0.55 })
+    )
+    pillar.position.y = 5
+    const orb = new THREE.Mesh(
+      new THREE.SphereGeometry(0.55, 10, 8),
+      new THREE.MeshBasicMaterial({ color: col })
+    )
+    orb.position.y = 10.5
+    const base = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.8, 1.0, 0.4, 10),
+      new THREE.MeshLambertMaterial({ color: col })
+    )
+    base.position.y = 0.2
+    const light = new THREE.PointLight(col, 4, 50)
+    light.position.y = 10.5
+    group.add(base, pillar, orb, light)
+    const groundY = getTerrainHeight(position[0], position[2], this.seed)
+    group.position.set(position[0], groundY, position[2])
+    group.name = `beacon_${name}`
     this.scene.add(group)
   }
 
@@ -178,11 +261,9 @@ export class GameEngine {
   private loop = (): void => {
     this.animationId = requestAnimationFrame(this.loop)
     const delta = Math.min(this.clock.getDelta(), 0.05)
-
     this.controller.update(delta, (x, z) => getTerrainHeight(x, z, this.seed))
     this.entityManager.update(delta, this.camera.position)
     this.updateRain(delta)
-
     this.renderer.render(this.scene, this.camera)
   }
 
