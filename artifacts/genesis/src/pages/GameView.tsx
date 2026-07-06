@@ -30,7 +30,7 @@ export default function GameView({ onExit }: Props) {
 
   const {
     currentWorld, addEvent, addEntity, removeEntity,
-    updateEntity, addMechanic, updateAiMemory,
+    updateEntity, addMechanic, addTerrainMod, updateAiMemory,
     incrementGeneration, updatePlayTime, aiReady,
   } = useGameStore()
 
@@ -93,6 +93,8 @@ export default function GameView({ onExit }: Props) {
           const mod = command.modification
           if (mod?.type && mod.position && mod.radius && mod.strength) {
             engineRef.current?.applyTerrainMod(mod)
+            // Persist the modification so it's saved and restored on reload
+            addTerrainMod(mod)
             const names: Record<string, string> = {
               mountain: 'гора', cave: 'пещера', river: 'река', anomaly: 'аномалия',
             }
@@ -152,7 +154,7 @@ export default function GameView({ onExit }: Props) {
       aiThinkingRef.current = false
       setAiThinking(false)
     }
-  }, [currentWorld, aiReady, addEntity, addEvent, addMechanic, incrementGeneration, removeEntity, updateAiMemory, updateEntity])
+  }, [currentWorld, aiReady, addEntity, addEvent, addMechanic, addTerrainMod, incrementGeneration, removeEntity, updateAiMemory, updateEntity])
   // NOTE: aiThinking intentionally removed from deps — we use aiThinkingRef for the guard
 
   // Keep the ref always pointing to the latest version of runAITick
@@ -166,9 +168,11 @@ export default function GameView({ onExit }: Props) {
     engine.start()
     aiIntervalRef.current = setInterval(() => runAITickRef.current(), AI_INTERVAL_MS)
     saveIntervalRef.current = setInterval(async () => {
-      if (currentWorld) {
+      // Use getState() to always get the latest world, never a stale closure snapshot
+      const latestWorld = useGameStore.getState().currentWorld
+      if (latestWorld) {
         updatePlayTime(30)
-        await saveManager.saveWorld({ ...currentWorld, lastPlayedAt: Date.now() }).catch(() => {})
+        await saveManager.saveWorld({ ...latestWorld, lastPlayedAt: Date.now() }).catch(() => {})
       }
     }, 30_000)
     if (aiReady) setTimeout(() => runAITickRef.current(), 3000)
