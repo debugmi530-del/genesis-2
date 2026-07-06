@@ -46,12 +46,30 @@ function lerp(a: number, b: number, t: number): number {
 
 const activeMods: TerrainModification[] = []
 
+// ─── Height cache ─────────────────────────────────────────────────────────────
+// getTerrainHeight is pure and deterministic — same (x,z,seed) always returns
+// the same value. Cache at 0.5-unit resolution to avoid redundant fbm work.
+const _heightCache = new Map<string, number>()
+
+export function getTerrainHeightCached(x: number, z: number, seed: number): number {
+  const key = `${Math.round(x * 2)}_${Math.round(z * 2)}`
+  if (_heightCache.has(key)) return _heightCache.get(key)!
+  const h = getTerrainHeight(x, z, seed)
+  _heightCache.set(key, h)
+  return h
+}
+
+function clearHeightCache(): void {
+  _heightCache.clear()
+}
+
 export function addTerrainMod(mod: TerrainModification): void {
   activeMods.push(mod)
 }
 
 export function clearTerrainMods(): void {
   activeMods.length = 0
+  clearHeightCache()
 }
 
 function getModHeight(x: number, z: number): number {
@@ -91,6 +109,7 @@ export function getTerrainHeight(x: number, z: number, seed: number): number {
 }
 
 export function rebuildTerrainMesh(mesh: THREE.Mesh, seed: number): void {
+  clearHeightCache()
   const geo = mesh.geometry as THREE.BufferGeometry
   const positions = geo.attributes.position as THREE.BufferAttribute
   const colors    = geo.attributes.color    as THREE.BufferAttribute
@@ -168,11 +187,24 @@ export interface StructurePart {
   segments?: number
 }
 
+// ─── Material cache ───────────────────────────────────────────────────────────
+// MeshLambertMaterial is safe to share across meshes when color/opacity match.
+// Avoids creating hundreds of identical material objects for repeated parts.
+const _matCache = new Map<string, THREE.MeshLambertMaterial>()
+
+function getCachedMat(colorStr: string, opacity: number): THREE.MeshLambertMaterial {
+  const key = `${colorStr}_${opacity.toFixed(2)}`
+  if (_matCache.has(key)) return _matCache.get(key)!
+  const color = new THREE.Color(colorStr)
+  const mat = new THREE.MeshLambertMaterial({ color, transparent: opacity < 1, opacity })
+  _matCache.set(key, mat)
+  return mat
+}
+
 function buildPartMesh(part: StructurePart): THREE.Object3D {
-  const color   = new THREE.Color(part.color || '#888888')
-  const opacity = part.opacity ?? 1
-  const transparent = opacity < 1
-  const mat = new THREE.MeshLambertMaterial({ color, transparent, opacity })
+  const colorStr = part.color || '#888888'
+  const opacity  = part.opacity ?? 1
+  const mat = getCachedMat(colorStr, opacity)
 
   let geo: THREE.BufferGeometry
 
