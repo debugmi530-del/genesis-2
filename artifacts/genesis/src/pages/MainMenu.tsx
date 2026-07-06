@@ -221,18 +221,24 @@ export default function MainMenu({ onEnterWorld }: Props) {
     const file = e.target.files?.[0]
     if (!file) return
     e.target.value = ''  // reset so same file can be re-selected
+
+    // Stop any in-progress model download before starting import
+    // (prevents concurrent Cache API writes + download/import race)
+    genesisAI.reset()
+    stopTimer()
+
     openStorageModal('import')
     try {
       await importModel(file, (p) => setStorageProgress(p))
-      setStorageDone(true)
-      // Re-init AI from the freshly restored cache
-      genesisAI.reset()
+      // Kick off re-init from the restored cache BEFORE marking done,
+      // so the loading phase is live when the user closes this modal.
       setAiReady(false)
       setPhase('loading')
-      closeStorageModal()
       initAI()
-    } catch (e) {
-      setStorageError(e instanceof Error ? e.message : String(e))
+      // Show the success state — user clicks OK to dismiss
+      setStorageDone(true)
+    } catch (err) {
+      setStorageError(err instanceof Error ? err.message : String(err))
     }
   }
 

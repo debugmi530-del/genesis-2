@@ -199,7 +199,32 @@ export async function importModel(
     )
   }
 
-  const manifest = JSON.parse(new TextDecoder().decode(manifestRaw)) as Manifest
+  let manifest: Manifest
+  try {
+    manifest = JSON.parse(new TextDecoder().decode(manifestRaw)) as Manifest
+  } catch {
+    throw new Error('Архив повреждён — не удалось прочитать manifest.json.')
+  }
+
+  if (manifest.version !== 2) {
+    throw new Error(
+      `Неподдерживаемая версия архива (version=${manifest.version}).\n` +
+      'Пересохраните модель текущей версией игры.',
+    )
+  }
+  if (!manifest.files?.length) {
+    throw new Error('Архив пуст — файлы модели отсутствуют.')
+  }
+
+  // Validate that every declared file is actually present in the ZIP before
+  // writing anything to the cache (fail-fast avoids partial restore).
+  const missing = manifest.files.filter(e => !extracted[e.zipName]).map(e => e.zipName)
+  if (missing.length > 0) {
+    throw new Error(
+      `Архив неполный — отсутствуют файлы:\n${missing.slice(0, 5).join('\n')}` +
+      (missing.length > 5 ? `\n…и ещё ${missing.length - 5}` : ''),
+    )
+  }
 
   // Restore each file to the exact Cache API bucket + URL it came from
   for (let i = 0; i < manifest.files.length; i++) {
@@ -207,12 +232,7 @@ export async function importModel(
     const label   = entry.zipName.length > 40 ? entry.zipName.slice(-40) : entry.zipName
     onProgress({ step: `Восстановление: ${label}`, current: i + 1, total: manifest.files.length })
 
-    const fileData = extracted[entry.zipName]
-    if (!fileData) {
-      console.warn('[ModelStorage] Файл не найден в архиве:', entry.zipName)
-      continue
-    }
-
+    const fileData = extracted[entry.zipName]!   // presence confirmed above
     const cache = await caches.open(entry.cacheName)
     await cache.put(
       entry.cacheUrl,
