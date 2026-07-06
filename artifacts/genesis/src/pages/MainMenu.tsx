@@ -165,8 +165,7 @@ export default function MainMenu({ onEnterWorld }: Props) {
   async function handleFullReset() {
     setFullResetting(true)
     try {
-      const worldList = await saveManager.listWorlds()
-      for (const w of worldList) await saveManager.deleteWorld(w.id)
+      await saveManager.deleteAllWorlds()
       await GenesisAI.clearCache()
       genesisAI.reset()
       setAiReady(false)
@@ -513,30 +512,32 @@ export default function MainMenu({ onEnterWorld }: Props) {
                 )}
               </motion.div>
 
-              {/* AI mode badge + cache reset */}
-              <motion.div
-                className="flex items-center justify-between w-full"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ delay: 0.5 }}
-              >
-                <div className="flex items-center gap-2">
-                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                  <span className="text-xs text-zinc-600">ИИ готов</span>
-                  {genesisAI.activeBackend === 'wasm' && (
-                    <span className="text-xs text-yellow-500 bg-yellow-900/20 border border-yellow-800/30 rounded px-1.5 py-0.5">
-                      CPU режим
-                    </span>
-                  )}
-                </div>
-                <button
-                  onClick={handleResetAI}
-                  disabled={resettingAI}
-                  className="text-xs text-zinc-700 hover:text-zinc-400 transition-colors disabled:opacity-40"
+              {/* AI mode badge + cache reset — only shown when AI loaded successfully */}
+              {aiStatus === 'ready' && (
+                <motion.div
+                  className="flex items-center justify-between w-full"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ delay: 0.5 }}
                 >
-                  {resettingAI ? 'Удаление...' : '↻ Сбросить кэш'}
-                </button>
-              </motion.div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                    <span className="text-xs text-zinc-600">ИИ готов</span>
+                    {genesisAI.activeBackend === 'wasm' && (
+                      <span className="text-xs text-yellow-500 bg-yellow-900/20 border border-yellow-800/30 rounded px-1.5 py-0.5">
+                        CPU режим
+                      </span>
+                    )}
+                  </div>
+                  <button
+                    onClick={handleResetAI}
+                    disabled={resettingAI}
+                    className="text-xs text-zinc-700 hover:text-zinc-400 transition-colors disabled:opacity-40"
+                  >
+                    {resettingAI ? 'Удаление...' : '↻ Сбросить кэш'}
+                  </button>
+                </motion.div>
+              )}
 
               {/* Footer */}
               <motion.div
