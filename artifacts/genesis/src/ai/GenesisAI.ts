@@ -116,7 +116,17 @@ world_message — послание мира игроку:
 5. В parts: pos[1] (y) — высота над землёй; складывай части вверх
 6. Реагируй на количество существ и историю мира`
 
-const MODEL_ID = 'Phi-3.5-mini-instruct-q4f16_1-MLC'
+export const AVAILABLE_MODELS = [
+  { id: 'Phi-3.5-mini-instruct-q4f16_1-MLC',          label: 'Phi-3.5-mini',   size: '~2.1 ГБ', quality: 'лучшее качество' },
+  { id: 'Llama-3.2-1B-Instruct-q4f16_1-MLC',          label: 'Llama-3.2-1B',  size: '~0.8 ГБ', quality: 'быстрая' },
+  { id: 'Llama-3.2-3B-Instruct-q4f16_1-MLC',          label: 'Llama-3.2-3B',  size: '~1.7 ГБ', quality: 'хорошее' },
+  { id: 'Qwen2.5-0.5B-Instruct-q4f16_1-MLC',          label: 'Qwen2.5-0.5B',  size: '~0.4 ГБ', quality: 'минимальная' },
+  { id: 'gemma-2-2b-it-q4f16_1-MLC',                  label: 'Gemma-2-2B',    size: '~1.4 ГБ', quality: 'хорошее' },
+] as const
+
+export type ModelId = typeof AVAILABLE_MODELS[number]['id']
+
+const DEFAULT_MODEL: ModelId = 'Phi-3.5-mini-instruct-q4f16_1-MLC'
 const MODEL_SIZE_BYTES = 2.2 * 1024 * 1024 * 1024
 
 export class GenesisAI {
@@ -125,8 +135,13 @@ export class GenesisAI {
   private isGenerating = false
   lastInitError: AIInitError | null = null
   lastRawError: string | null = null
+  activeModelId: ModelId = DEFAULT_MODEL
 
-  async initialize(onProgress: (progress: number, message: string) => void): Promise<void> {
+  async initialize(
+    onProgress: (progress: number, message: string) => void,
+    modelId: ModelId = DEFAULT_MODEL
+  ): Promise<void> {
+    this.activeModelId = modelId
     if (typeof navigator === 'undefined' || !navigator.gpu) {
       this.lastInitError = 'webgpu_not_supported'
       throw new Error('webgpu_not_supported')
@@ -156,7 +171,7 @@ export class GenesisAI {
     try {
       const webllm = await import('@mlc-ai/web-llm')
       let highWaterMark = 0
-      this.engine = await webllm.CreateMLCEngine(MODEL_ID, {
+      this.engine = await webllm.CreateMLCEngine(modelId, {
         initProgressCallback: (p: { progress: number; text: string }) => {
           const pct = Math.round(p.progress * 100)
           if (pct > highWaterMark) highWaterMark = pct
