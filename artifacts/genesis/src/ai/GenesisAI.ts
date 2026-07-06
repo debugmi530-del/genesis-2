@@ -29,7 +29,7 @@ export type AICommand =
 export type AIInitError = 'network_error' | 'cache_error' | 'unknown'
 export type AIBackend = 'webgpu' | 'wasm'
 
-const MODEL_ID = 'onnx-community/Qwen2.5-3B-Instruct'
+const MODEL_ID = 'onnx-community/Qwen2.5-Coder-3B-Instruct'
 
 type TFMessage = { role: string; content: string }
 type TFPipeline = (
@@ -332,7 +332,7 @@ export class GenesisAI {
     this.lastInitError = null
     this.lastRawError = null
 
-    const hasWebGPU = typeof navigator !== 'undefined' && !!navigator.gpu
+    const hasWebGPU = typeof navigator !== 'undefined' && !!(navigator as Navigator & { gpu?: unknown }).gpu
 
     if (hasWebGPU) {
       onProgress(0, 'Инициализация WebGPU...')

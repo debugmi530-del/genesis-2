@@ -253,7 +253,7 @@ function buildPartMesh(part: StructurePart): THREE.Object3D {
   if (part.glow) {
     const group = new THREE.Group()
     group.add(mesh)
-    const light = new THREE.PointLight(color, 2, 20)
+    const light = new THREE.PointLight(colorStr, 2, 20)
     light.position.set(px, py, pz)
     group.add(light)
     return group
