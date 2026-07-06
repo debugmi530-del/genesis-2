@@ -153,16 +153,12 @@ export interface StructurePart {
   color?: string
   glow?: boolean
   opacity?: number
-  // box
   size?: [number, number, number]
-  // cylinder / cone
   r?: number
   r1?: number
   r2?: number
   h?: number
-  // torus
   tube?: number
-  // rotation
   rotX?: number
   rotY?: number
   rotZ?: number
@@ -226,23 +222,16 @@ function buildPartMesh(part: StructurePart): THREE.Object3D {
   return mesh
 }
 
-// Создаёт 3D объект — либо по parts (custom), либо по named template
 export function createStructureMesh(type: string, parts?: StructurePart[]): THREE.Group {
   const group = new THREE.Group()
 
-  // ─ Параметрический режим ─
   if (parts && parts.length > 0) {
     for (const part of parts) {
-      try {
-        group.add(buildPartMesh(part))
-      } catch (_) {
-        // пропускаем битую часть
-      }
+      try { group.add(buildPartMesh(part)) } catch (_) {}
     }
     return group
   }
 
-  // ─ Named templates (запасной вариант) ─
   const t = type.toLowerCase()
 
   if (t.includes('tree') || t.includes('дерев') || t.includes('лес')) {
@@ -253,7 +242,6 @@ export function createStructureMesh(type: string, parts?: StructurePart[]): THRE
     const crown = new THREE.Mesh(new THREE.SphereGeometry(2.8, 8, 6), crownMat)
     crown.position.y = 6; crown.castShadow = true
     group.add(trunk, crown)
-
   } else if (t.includes('ancient') || t.includes('древн')) {
     const trunkMat = new THREE.MeshLambertMaterial({ color: 0x2a1a0e })
     const crownMat = new THREE.MeshLambertMaterial({ color: 0x1a4a0e })
@@ -262,12 +250,11 @@ export function createStructureMesh(type: string, parts?: StructurePart[]): THRE
     const crown = new THREE.Mesh(new THREE.SphereGeometry(5, 8, 6), crownMat)
     crown.position.y = 11; crown.scale.y = 0.7; crown.castShadow = true
     group.add(trunk, crown)
-
   } else if (t.includes('ruin') || t.includes('руин')) {
     const mat = new THREE.MeshLambertMaterial({ color: 0x888070 })
     const walls: [number, number, number, number, number, number][] = [
-      [6, 3, 0.7, 0,   1.5, -3.3],
-      [0.7, 4, 5, 3.3, 2,   0   ],
+      [6, 3, 0.7, 0, 1.5, -3.3],
+      [0.7, 4, 5, 3.3, 2, 0],
       [3, 1.5, 0.7, -1.5, 0.75, 3.3],
     ]
     for (const [w, h, d, x, y, z] of walls) {
@@ -275,7 +262,6 @@ export function createStructureMesh(type: string, parts?: StructurePart[]): THRE
       m.position.set(x, y, z); m.rotation.y = (Math.random() - 0.5) * 0.15
       m.castShadow = true; group.add(m)
     }
-
   } else if (t.includes('altar') || t.includes('алтар')) {
     const mat = new THREE.MeshLambertMaterial({ color: 0x445566 })
     const plat = new THREE.Mesh(new THREE.BoxGeometry(5, 0.6, 5), mat)
@@ -287,7 +273,6 @@ export function createStructureMesh(type: string, parts?: StructurePart[]): THRE
     const light = new THREE.PointLight(0x6688ff, 2, 25)
     light.position.y = 4.1
     group.add(plat, pillar, orb, light)
-
   } else if (t.includes('nest') || t.includes('гнездо')) {
     const mat = new THREE.MeshLambertMaterial({ color: 0x5a3a20 })
     for (let i = 0; i < 7; i++) {
@@ -297,7 +282,6 @@ export function createStructureMesh(type: string, parts?: StructurePart[]): THRE
       log.rotation.z = Math.PI * 0.35; log.rotation.y = angle + Math.PI / 2
       log.castShadow = true; group.add(log)
     }
-
   } else if (t.includes('crystal') || t.includes('кристалл')) {
     const cols = [0x88ffcc, 0xaaffee, 0x66ddff]
     for (let i = 0; i < 3; i++) {
@@ -308,13 +292,11 @@ export function createStructureMesh(type: string, parts?: StructurePart[]): THRE
       group.add(m)
     }
     group.add(Object.assign(new THREE.PointLight(0x44ffcc, 1.5, 18), { position: new THREE.Vector3(0, 3, 0) }))
-
   } else if (t.includes('monolith') || t.includes('монолит')) {
     const mat = new THREE.MeshLambertMaterial({ color: 0x666055 })
     const m = new THREE.Mesh(new THREE.BoxGeometry(1.5, 6, 0.8), mat)
     m.position.y = 3; m.rotation.y = (Math.random() - 0.5) * 0.3
     m.castShadow = true; group.add(m)
-
   } else {
     const mat = new THREE.MeshLambertMaterial({ color: 0x777070 })
     const base = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 1.8, 5, 8), mat)
@@ -322,6 +304,278 @@ export function createStructureMesh(type: string, parts?: StructurePart[]): THRE
     const top = new THREE.Mesh(new THREE.ConeGeometry(1.6, 1.5, 8), new THREE.MeshLambertMaterial({ color: 0x554444 }))
     top.position.y = 6; top.castShadow = true
     group.add(base, top)
+  }
+
+  return group
+}
+
+// ─── Флора (18 видов растительности) ─────────────────────────────────────────
+
+function mat(hex: number | string, opacity = 1): THREE.MeshLambertMaterial {
+  const color = typeof hex === 'string' ? new THREE.Color(hex) : new THREE.Color(hex)
+  return new THREE.MeshLambertMaterial({ color, transparent: opacity < 1, opacity })
+}
+
+function addM(group: THREE.Group, geo: THREE.BufferGeometry, m: THREE.Material,
+              px = 0, py = 0, pz = 0, rxDeg = 0, ryDeg = 0, rzDeg = 0): void {
+  const mesh = new THREE.Mesh(geo, m)
+  mesh.position.set(px, py, pz)
+  if (rxDeg) mesh.rotation.x = rxDeg * Math.PI / 180
+  if (ryDeg) mesh.rotation.y = ryDeg * Math.PI / 180
+  if (rzDeg) mesh.rotation.z = rzDeg * Math.PI / 180
+  mesh.castShadow = true
+  group.add(mesh)
+}
+
+export function createFloraMesh(type: string, parts?: StructurePart[], scale = 1.0, colorVariant?: string): THREE.Group {
+  const group = new THREE.Group()
+
+  if (parts && parts.length > 0) {
+    for (const part of parts) {
+      try { group.add(buildPartMesh(part)) } catch (_) {}
+    }
+    return group
+  }
+
+  const t = type.toLowerCase()
+  const s = Math.max(0.2, Math.min(5, scale))
+  const cv = colorVariant
+
+  if (t === 'oak' || t === 'дуб') {
+    const th = 4 * s
+    addM(group, new THREE.CylinderGeometry(0.3*s, 0.5*s, th, 8), mat(0x4a3728), 0, th/2, 0)
+    addM(group, new THREE.SphereGeometry(2.5*s, 9, 7), mat(cv || 0x2d7a1e), 0, th+2*s, 0)
+    addM(group, new THREE.SphereGeometry(1.8*s, 8, 6), mat(0x347a22), -1.5*s, th+1.5*s, 0.5*s)
+    addM(group, new THREE.SphereGeometry(1.6*s, 8, 6), mat(0x257a18), 1.2*s, th+1.2*s, -0.8*s)
+
+  } else if (t === 'pine' || t === 'сосна') {
+    addM(group, new THREE.CylinderGeometry(0.2*s, 0.4*s, 5*s, 7), mat(0x4a3020), 0, 2.5*s, 0)
+    for (let i = 0; i < 4; i++) {
+      const y = (1.2 + i * 1.3) * s
+      const r = (2.2 - i * 0.45) * s
+      const h = (2 + i * 0.3) * s
+      addM(group, new THREE.ConeGeometry(r, h, 8), mat(cv || 0x1a5c20), 0, y + h/2, 0)
+    }
+
+  } else if (t === 'birch' || t === 'берёза') {
+    const th = 5 * s
+    addM(group, new THREE.CylinderGeometry(0.18*s, 0.28*s, th, 7), mat(0xe8e0d0), 0, th/2, 0)
+    for (let i = 0; i < 4; i++) {
+      addM(group, new THREE.BoxGeometry(0.38*s, 0.15*s, 0.38*s), mat(0x333333), 0, 1+i*1.1*s, 0)
+    }
+    addM(group, new THREE.SphereGeometry(1.8*s, 8, 6), mat(cv || 0x8bc34a), -0.5*s, th+1.5*s, 0)
+    addM(group, new THREE.SphereGeometry(1.4*s, 7, 5), mat(0x7ab03e), 0.8*s, th+1.2*s, 0.4*s)
+
+  } else if (t === 'willow' || t === 'ива') {
+    const th = 5 * s
+    addM(group, new THREE.CylinderGeometry(0.3*s, 0.5*s, th, 8), mat(0x3d2b14), 0, th/2, 0)
+    const crown = new THREE.Mesh(new THREE.SphereGeometry(3*s, 9, 7), mat(cv || 0x4a8c2e))
+    crown.scale.y = 0.55; crown.position.set(0, th+1.2*s, 0); crown.castShadow = true; group.add(crown)
+    for (let i = 0; i < 7; i++) {
+      const angle = (i/7)*Math.PI*2
+      const branch = new THREE.Mesh(new THREE.CylinderGeometry(0.05*s, 0.03*s, 2.8*s, 4), mat(0x4a8c2e))
+      branch.position.set(Math.cos(angle)*2.2*s, th-0.5*s, Math.sin(angle)*2.2*s)
+      branch.rotation.z = Math.cos(angle) * 0.85; branch.rotation.x = Math.sin(angle) * 0.85
+      group.add(branch)
+    }
+
+  } else if (t === 'palm' || t === 'пальма') {
+    for (let i = 0; i < 5; i++) {
+      const seg = new THREE.Mesh(new THREE.CylinderGeometry(0.22*s, 0.28*s, 1.5*s, 7), mat(0x8b6914))
+      seg.position.set(i*0.15*s, 0.75*s + i*1.5*s, 0); seg.rotation.z = i * 0.05
+      seg.castShadow = true; group.add(seg)
+    }
+    const topY = 7.5 * s
+    for (let i = 0; i < 7; i++) {
+      const angle = (i/7)*Math.PI*2
+      const frond = new THREE.Mesh(new THREE.ConeGeometry(0.35*s, 2.8*s, 4), mat(cv || 0x2d8a1e))
+      frond.position.set(Math.cos(angle)*1.5*s, topY, Math.sin(angle)*1.5*s)
+      frond.rotation.z = 1.1 * Math.cos(angle); frond.rotation.x = 1.1 * Math.sin(angle)
+      group.add(frond)
+    }
+
+  } else if (t === 'dead_tree' || t === 'мёртвое_дерево') {
+    addM(group, new THREE.CylinderGeometry(0.25*s, 0.45*s, 5*s, 6), mat(0x4a3a2a), 0, 2.5*s, 0)
+    const angles = [0.4, 1.8, 3.5, 4.9, 5.8]
+    angles.forEach((angle, i) => {
+      const branch = new THREE.Mesh(new THREE.CylinderGeometry(0.06*s, 0.12*s, 2*s, 5), mat(0x3a2a1a))
+      branch.position.set(Math.cos(angle)*0.3*s, (2.5+i*0.4)*s, Math.sin(angle)*0.3*s)
+      branch.rotation.z = (Math.random()-0.5)*1.5; branch.rotation.y = angle; group.add(branch)
+    })
+
+  } else if (t === 'sakura' || t === 'сакура') {
+    const th = 4 * s
+    addM(group, new THREE.CylinderGeometry(0.25*s, 0.4*s, th, 7), mat(0x5a3320), 0, th/2, 0)
+    addM(group, new THREE.SphereGeometry(2.2*s, 9, 7), mat(cv || 0xff88bb), 0, th+1.8*s, 0)
+    addM(group, new THREE.SphereGeometry(1.5*s, 8, 6), mat(0xff99cc), -1.3*s, th+1.3*s, 0.6*s)
+    addM(group, new THREE.SphereGeometry(1.3*s, 7, 5), mat(0xffaadd), 1*s, th+1*s, -0.8*s)
+    // Falling petals hint
+    for (let i = 0; i < 5; i++) {
+      const angle = (i/5)*Math.PI*2
+      addM(group, new THREE.SphereGeometry(0.12*s, 5, 4), mat(0xffbbdd),
+        Math.cos(angle)*2.5*s, th+(Math.random()*1.5)*s, Math.sin(angle)*2.5*s)
+    }
+
+  } else if (t === 'jungle_tree' || t === 'джунгли') {
+    const th = 6 * s
+    addM(group, new THREE.CylinderGeometry(0.5*s, 0.7*s, th, 8), mat(0x3a2a14), 0, th/2, 0)
+    for (let i = 0; i < 4; i++) {
+      const angle = (i/4)*Math.PI*2
+      const root = new THREE.Mesh(new THREE.CylinderGeometry(0.08*s, 0.15*s, 2*s, 5), mat(0x3a2a14))
+      root.position.set(Math.cos(angle)*0.8*s, 0.5*s, Math.sin(angle)*0.8*s)
+      root.rotation.z = Math.cos(angle)*0.4; root.rotation.x = Math.sin(angle)*0.4; group.add(root)
+    }
+    const canopy = new THREE.Mesh(new THREE.SphereGeometry(3.5*s, 9, 6), mat(cv || 0x1a5c10))
+    canopy.scale.y = 0.6; canopy.position.set(0, th+1.5*s, 0); canopy.castShadow = true; group.add(canopy)
+    addM(group, new THREE.SphereGeometry(2.5*s, 8, 5), mat(0x228b22), -1.5*s, th+0.8*s, 1*s)
+
+  } else if (t === 'ancient_oak' || t === 'древний_дуб') {
+    const th = 7 * s
+    addM(group, new THREE.CylinderGeometry(0.8*s, 1.2*s, th, 9), mat(0x2a1a0e), 0, th/2, 0)
+    for (let i = 0; i < 5; i++) {
+      const angle = (i/5)*Math.PI*2
+      const root = new THREE.Mesh(new THREE.BoxGeometry(0.4*s, 1.5*s, 2*s), mat(0x2a1a0e))
+      root.position.set(Math.cos(angle)*1.5*s, 0.5*s, Math.sin(angle)*1.5*s)
+      root.rotation.y = angle; group.add(root)
+    }
+    addM(group, new THREE.SphereGeometry(4*s, 10, 8), mat(cv || 0x1a5a0e), 0, th+3*s, 0)
+    addM(group, new THREE.SphereGeometry(3*s, 9, 7), mat(0x1e6412), -2.5*s, th+1.5*s, 0.8*s)
+    addM(group, new THREE.SphereGeometry(2.5*s, 8, 6), mat(0x185a10), 2*s, th+1*s, -1.5*s)
+    addM(group, new THREE.SphereGeometry(2*s, 8, 6), mat(0x1a6814), 0.5*s, th+0*s, 2*s)
+
+  } else if (t === 'mushroom' || t === 'гриб') {
+    addM(group, new THREE.CylinderGeometry(0.15*s, 0.2*s, 1.2*s, 7), mat(0xd4c5a0), 0, 0.6*s, 0)
+    const cap = new THREE.Mesh(new THREE.SphereGeometry(1.1*s, 10, 7), mat(cv || 0xcc3322))
+    cap.scale.y = 0.5; cap.position.set(0, 1.45*s, 0); cap.castShadow = true; group.add(cap)
+    for (let i = 0; i < 5; i++) {
+      const angle = (i/5)*Math.PI*2
+      addM(group, new THREE.SphereGeometry(0.1*s, 5, 4), mat(0xffffff),
+        Math.cos(angle)*0.55*s, 1.55*s, Math.sin(angle)*0.55*s)
+    }
+
+  } else if (t === 'giant_mushroom' || t === 'гигантский_гриб') {
+    addM(group, new THREE.CylinderGeometry(0.35*s, 0.5*s, 4*s, 8), mat(0xc8b89a), 0, 2*s, 0)
+    const cap = new THREE.Mesh(new THREE.SphereGeometry(3.5*s, 10, 8), mat(cv || 0x882211))
+    cap.scale.y = 0.45; cap.position.set(0, 4.3*s, 0); cap.castShadow = true; group.add(cap)
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(3*s, 0.12*s, 6, 24), mat(0xffeeaa, 0.8))
+    ring.position.y = 4*s; ring.rotation.x = Math.PI/2; group.add(ring)
+
+  } else if (t === 'bioluminescent_mushroom' || t === 'светящийся_гриб') {
+    addM(group, new THREE.CylinderGeometry(0.12*s, 0.18*s, 1.5*s, 7), mat(0xa0c8c8), 0, 0.75*s, 0)
+    const cap = new THREE.Mesh(new THREE.SphereGeometry(0.9*s, 9, 7), mat(cv || 0x44ffcc, 0.85))
+    cap.scale.y = 0.6; cap.position.set(0, 1.6*s, 0); cap.castShadow = true; group.add(cap)
+    const light = new THREE.PointLight(new THREE.Color(cv || '#44ffcc'), 1.5, 12)
+    light.position.set(0, 1.6*s, 0); group.add(light)
+
+  } else if (t === 'flower' || t === 'цветок') {
+    addM(group, new THREE.CylinderGeometry(0.04*s, 0.06*s, 0.8*s, 5), mat(0x3a8a20), 0, 0.4*s, 0)
+    for (let i = 0; i < 6; i++) {
+      const angle = (i/6)*Math.PI*2
+      const petal = new THREE.Mesh(new THREE.SphereGeometry(0.2*s, 6, 4), mat(cv || 0xff6688))
+      petal.scale.z = 0.3; petal.position.set(Math.cos(angle)*0.22*s, 0.85*s, Math.sin(angle)*0.22*s)
+      group.add(petal)
+    }
+    addM(group, new THREE.SphereGeometry(0.15*s, 7, 6), mat(0xffee44), 0, 0.85*s, 0)
+
+  } else if (t === 'sunflower' || t === 'подсолнух') {
+    addM(group, new THREE.CylinderGeometry(0.07*s, 0.1*s, 1.8*s, 6), mat(0x3a7820), 0, 0.9*s, 0)
+    for (let i = 0; i < 12; i++) {
+      const angle = (i/12)*Math.PI*2
+      const petal = new THREE.Mesh(new THREE.BoxGeometry(0.08*s, 0.55*s, 0.2*s), mat(cv || 0xffcc00))
+      petal.position.set(Math.cos(angle)*0.42*s, 1.9*s, Math.sin(angle)*0.42*s)
+      petal.rotation.y = angle; group.add(petal)
+    }
+    addM(group, new THREE.CylinderGeometry(0.3*s, 0.3*s, 0.12*s, 10), mat(0x3a2000), 0, 1.9*s, 0)
+
+  } else if (t === 'fern' || t === 'папоротник') {
+    for (let i = 0; i < 8; i++) {
+      const angle = (i/8)*Math.PI*2 + Math.PI/8
+      const frond = new THREE.Mesh(new THREE.BoxGeometry(0.1*s, 1.5*s, 0.07*s), mat(cv || 0x2d8a20))
+      frond.position.set(Math.cos(angle)*0.3*s, 0.5*s, Math.sin(angle)*0.3*s)
+      frond.rotation.z = Math.cos(angle)*0.7; frond.rotation.x = Math.sin(angle)*0.4
+      frond.rotation.y = angle; group.add(frond)
+    }
+
+  } else if (t === 'cactus' || t === 'кактус') {
+    addM(group, new THREE.CylinderGeometry(0.3*s, 0.35*s, 3*s, 8), mat(cv || 0x2d7a2e), 0, 1.5*s, 0)
+    const cm = mat(cv || 0x2d7a2e)
+    const ah1 = new THREE.Mesh(new THREE.CylinderGeometry(0.2*s, 0.2*s, 1*s, 7), cm)
+    ah1.position.set(0.5*s, 1.8*s, 0); ah1.rotation.z = Math.PI/2; group.add(ah1)
+    const av1 = new THREE.Mesh(new THREE.CylinderGeometry(0.2*s, 0.2*s, 1.2*s, 7), cm)
+    av1.position.set(1*s, 2.4*s, 0); group.add(av1)
+    const ah2 = new THREE.Mesh(new THREE.CylinderGeometry(0.18*s, 0.18*s, 0.8*s, 7), cm)
+    ah2.position.set(-0.4*s, 2.2*s, 0); ah2.rotation.z = -Math.PI/2; group.add(ah2)
+    const av2 = new THREE.Mesh(new THREE.CylinderGeometry(0.18*s, 0.18*s, 1*s, 7), cm)
+    av2.position.set(-0.8*s, 2.7*s, 0); group.add(av2)
+
+  } else if (t === 'bush' || t === 'куст') {
+    for (let i = 0; i < 5; i++) {
+      const angle = (i/5)*Math.PI*2
+      const r = (0.5 + (i%2)*0.3) * s
+      addM(group, new THREE.SphereGeometry((0.5+i*0.08)*s, 7, 5), mat(cv || 0x2d6a18),
+        Math.cos(angle)*r, (0.3+i*0.05)*s, Math.sin(angle)*r)
+    }
+    addM(group, new THREE.SphereGeometry(0.7*s, 7, 5), mat(0x357a20), 0, 0.6*s, 0)
+
+  } else if (t === 'bamboo' || t === 'бамбук') {
+    const segs = Math.max(3, Math.round(4*s))
+    for (let i = 0; i < segs; i++) {
+      addM(group, new THREE.CylinderGeometry(0.12*s, 0.14*s, 1.2*s, 6), mat(cv || 0x6aaa30), 0, i*1.2*s+0.6*s, 0)
+      addM(group, new THREE.CylinderGeometry(0.16*s, 0.16*s, 0.1*s, 6), mat(0x558820), 0, (i+1)*1.2*s, 0)
+    }
+    for (let i = 0; i < 3; i++) {
+      const angle = (i/3)*Math.PI*2
+      const leaf = new THREE.Mesh(new THREE.BoxGeometry(0.07*s, 0.8*s, 0.25*s), mat(0x4a9a28))
+      leaf.position.set(Math.cos(angle)*0.3*s, segs*1.2*s+0.4*s, Math.sin(angle)*0.3*s)
+      leaf.rotation.z = Math.cos(angle)*0.8; leaf.rotation.x = Math.sin(angle)*0.6; group.add(leaf)
+    }
+
+  } else if (t === 'lily_pad' || t === 'кувшинка') {
+    addM(group, new THREE.CylinderGeometry(1.2*s, 1.2*s, 0.08*s, 12), mat(cv || 0x2d7a1e), 0, 0.04*s, 0)
+    for (let i = 0; i < 5; i++) {
+      const angle = (i/5)*Math.PI*2
+      const petal = new THREE.Mesh(new THREE.SphereGeometry(0.2*s, 6, 4), mat(0xffc0cb))
+      petal.scale.z = 0.4; petal.position.set(Math.cos(angle)*0.22*s, 0.2*s, Math.sin(angle)*0.22*s)
+      group.add(petal)
+    }
+    addM(group, new THREE.SphereGeometry(0.15*s, 6, 5), mat(0xffee55), 0, 0.22*s, 0)
+
+  } else if (t === 'grass_cluster' || t === 'трава') {
+    for (let i = 0; i < 14; i++) {
+      const angle = Math.random()*Math.PI*2
+      const dist = Math.random()*0.9*s
+      const h = (0.3 + Math.random()*0.6)*s
+      const blade = new THREE.Mesh(new THREE.BoxGeometry(0.06*s, h, 0.04*s), mat(cv || 0x4a8a20))
+      blade.position.set(Math.cos(angle)*dist, h/2, Math.sin(angle)*dist)
+      blade.rotation.z = (Math.random()-0.5)*0.5; group.add(blade)
+    }
+
+  } else if (t === 'spiral_tree' || t === 'спиральное_дерево') {
+    for (let i = 0; i < 8; i++) {
+      const angle = (i/8)*Math.PI*4
+      const seg = new THREE.Mesh(new THREE.CylinderGeometry(0.2*s, 0.28*s, 0.9*s, 6), mat(cv || 0x6a3a8e))
+      seg.position.set(Math.cos(angle)*0.4*s, i*0.9*s+0.45*s, Math.sin(angle)*0.4*s)
+      seg.castShadow = true; group.add(seg)
+    }
+    addM(group, new THREE.SphereGeometry(1.8*s, 9, 7), mat(0x8844cc), 0, 7.5*s, 0)
+    const light = new THREE.PointLight(0xaa66ff, 1, 15)
+    light.position.set(0, 7.5*s, 0); group.add(light)
+
+  } else if (t === 'mangrove' || t === 'мангровое') {
+    const th = 4 * s
+    addM(group, new THREE.CylinderGeometry(0.25*s, 0.35*s, th, 7), mat(0x3a2a14), 0, th/2, 0)
+    for (let i = 0; i < 6; i++) {
+      const angle = (i/6)*Math.PI*2
+      const root = new THREE.Mesh(new THREE.CylinderGeometry(0.06*s, 0.1*s, 2.5*s, 5), mat(0x3a2a14))
+      root.position.set(Math.cos(angle)*1.2*s, 0.8*s, Math.sin(angle)*1.2*s)
+      root.rotation.z = Math.cos(angle)*0.5; root.rotation.x = Math.sin(angle)*0.5; group.add(root)
+    }
+    addM(group, new THREE.SphereGeometry(2.5*s, 8, 6), mat(cv || 0x1a6a20), 0, th+2*s, 0)
+
+  } else {
+    // Default simple tree
+    addM(group, new THREE.CylinderGeometry(0.3*s, 0.5*s, 4*s, 8), mat(0x4a3728), 0, 2*s, 0)
+    addM(group, new THREE.SphereGeometry(2.5*s, 9, 7), mat(cv || 0x2d7a1e), 0, 6*s, 0)
   }
 
   return group
