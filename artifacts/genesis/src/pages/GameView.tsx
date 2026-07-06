@@ -16,6 +16,13 @@ export default function GameView({ onExit }: Props) {
   const engineRef = useRef<GameEngine | null>(null)
   const aiIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const saveIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  // Use a ref for the "is thinking" guard — keeps it out of useCallback deps
+  // so the interval never gets reset mid-cycle
+  const aiThinkingRef = useRef(false)
+  // Stable ref to the latest runAITick; the interval always calls through this
+  // so it never holds a stale closure
+  const runAITickRef = useRef<() => void>(() => {})
+
   const [paused, setPaused] = useState(false)
   const [showLog, setShowLog] = useState(true)
   const [aiThinking, setAiThinking] = useState(false)
@@ -28,7 +35,8 @@ export default function GameView({ onExit }: Props) {
   } = useGameStore()
 
   const runAITick = useCallback(async () => {
-    if (!currentWorld || !aiReady || aiThinking) return
+    if (!currentWorld || !aiReady || aiThinkingRef.current) return
+    aiThinkingRef.current = true
     setAiThinking(true)
 
     try {
@@ -141,23 +149,29 @@ export default function GameView({ onExit }: Props) {
     } catch (e) {
       console.warn('AI tick error', e)
     } finally {
+      aiThinkingRef.current = false
       setAiThinking(false)
     }
-  }, [currentWorld, aiReady, aiThinking, addEntity, addEvent, addMechanic, incrementGeneration, removeEntity, updateAiMemory, updateEntity])
+  }, [currentWorld, aiReady, addEntity, addEvent, addMechanic, incrementGeneration, removeEntity, updateAiMemory, updateEntity])
+  // NOTE: aiThinking intentionally removed from deps — we use aiThinkingRef for the guard
 
+  // Keep the ref always pointing to the latest version of runAITick
+  useEffect(() => { runAITickRef.current = runAITick }, [runAITick])
+
+  // Mount: start engine + intervals. Uses runAITickRef so no stale closures.
   useEffect(() => {
     if (!canvasRef.current || !currentWorld) return
     const engine = new GameEngine(canvasRef.current, currentWorld, () => setPaused(true))
     engineRef.current = engine
     engine.start()
-    aiIntervalRef.current = setInterval(runAITick, AI_INTERVAL_MS)
+    aiIntervalRef.current = setInterval(() => runAITickRef.current(), AI_INTERVAL_MS)
     saveIntervalRef.current = setInterval(async () => {
       if (currentWorld) {
         updatePlayTime(30)
         await saveManager.saveWorld({ ...currentWorld, lastPlayedAt: Date.now() }).catch(() => {})
       }
     }, 30_000)
-    if (aiReady) setTimeout(() => runAITick(), 3000)
+    if (aiReady) setTimeout(() => runAITickRef.current(), 3000)
     return () => {
       engine.dispose()
       if (aiIntervalRef.current) clearInterval(aiIntervalRef.current)
@@ -165,14 +179,17 @@ export default function GameView({ onExit }: Props) {
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Fire immediately when AI becomes ready
   useEffect(() => {
-    if (aiReady && engineRef.current) setTimeout(() => runAITick(), 2000)
+    if (aiReady && engineRef.current) setTimeout(() => runAITickRef.current(), 2000)
   }, [aiReady]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Pause / resume: only recreate the interval when pause state changes,
+  // NOT on every runAITick reference change (that was the timer-reset bug)
   useEffect(() => {
     if (aiIntervalRef.current) clearInterval(aiIntervalRef.current)
-    if (!paused) aiIntervalRef.current = setInterval(runAITick, AI_INTERVAL_MS)
-  }, [paused, runAITick])
+    if (!paused) aiIntervalRef.current = setInterval(() => runAITickRef.current(), AI_INTERVAL_MS)
+  }, [paused])
 
   const recentEvents = currentWorld?.worldState.eventLog.slice(0, 8) ?? []
 
