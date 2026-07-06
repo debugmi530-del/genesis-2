@@ -22,7 +22,7 @@ export type AICommand =
 export type AIInitError = 'network_error' | 'cache_error' | 'unknown'
 export type AIBackend = 'webgpu' | 'wasm'
 
-const MODEL_ID = 'onnx-community/Qwen2.5-0.5B-Instruct'
+const MODEL_ID = 'onnx-community/Qwen2.5-3B-Instruct'
 
 type TFMessage = { role: string; content: string }
 type TFPipeline = (
@@ -324,7 +324,7 @@ export class GenesisAI {
         { role: 'system', content: SYSTEM_PROMPT },
         { role: 'user',   content: this.describeState(worldState, playerAction) },
       ]
-      const output = await this.pipe(messages, { max_new_tokens: 700, temperature: 0.92, do_sample: true })
+      const output = await this.pipe(messages, { max_new_tokens: 900, temperature: 0.92, do_sample: true })
       const generated = output[0]?.generated_text
       let content: string
       if (Array.isArray(generated)) {

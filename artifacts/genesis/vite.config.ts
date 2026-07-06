@@ -39,6 +39,7 @@ export default defineConfig({
       output: {
         manualChunks: {
           three: ['three'],
+          transformers: ['@huggingface/transformers'],
         },
       },
     },
