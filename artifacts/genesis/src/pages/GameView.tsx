@@ -30,8 +30,8 @@ export default function GameView({ onExit }: Props) {
 
   const {
     currentWorld, addEvent, addEntity, removeEntity,
-    updateEntity, addMechanic, addTerrainMod, updateAiMemory,
-    incrementGeneration, updatePlayTime, aiReady,
+    updateEntity, addMechanic, addTerrainMod, addPlayerAbility,
+    updateAiMemory, incrementGeneration, updatePlayTime, aiReady,
   } = useGameStore()
 
   const runAITick = useCallback(async () => {
@@ -135,6 +135,8 @@ export default function GameView({ onExit }: Props) {
         }
 
         case 'player_ability': {
+          // Save to world state so AI context always reflects current abilities
+          addPlayerAbility(command.ability)
           addEvent({ message: `Способность: ${command.ability} — ${command.description}`, type: 'ai_create' })
           setLastAiAction(`Способность: ${command.ability}`)
           break
@@ -154,7 +156,7 @@ export default function GameView({ onExit }: Props) {
       aiThinkingRef.current = false
       setAiThinking(false)
     }
-  }, [currentWorld, aiReady, addEntity, addEvent, addMechanic, addTerrainMod, incrementGeneration, removeEntity, updateAiMemory, updateEntity])
+  }, [currentWorld, aiReady, addEntity, addEvent, addMechanic, addTerrainMod, addPlayerAbility, incrementGeneration, removeEntity, updateAiMemory, updateEntity])
   // NOTE: aiThinking intentionally removed from deps — we use aiThinkingRef for the guard
 
   // Keep the ref always pointing to the latest version of runAITick
@@ -256,7 +258,7 @@ export default function GameView({ onExit }: Props) {
         )}
         <button
           onClick={() => setShowLog(!showLog)}
-          className="text.xs text-white/40 bg-black/40 px-2 py-1 rounded hover:text-white/70"
+          className="text-xs text-white/40 bg-black/40 px-2 py-1 rounded hover:text-white/70"
         >
           {showLog ? 'Скрыть лог' : 'Показать лог'}
         </button>
