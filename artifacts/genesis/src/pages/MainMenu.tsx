@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { saveManager, type WorldSave } from '../store/saveManager'
-import { genesisAI, GenesisAI, AVAILABLE_MODELS, type ModelId } from '../ai/GenesisAI'
+import { genesisAI, GenesisAI } from '../ai/GenesisAI'
 import { useGameStore } from '../store/gameStore'
 
 interface Props {
@@ -37,7 +37,6 @@ export default function MainMenu({ onEnterWorld }: Props) {
   const [aiMessage, setAiMessage] = useState('')
   const [aiRawError, setAiRawError] = useState<string | null>(null)
   const [showRawError, setShowRawError] = useState(false)
-  const [selectedModel, setSelectedModel] = useState<ModelId>(AVAILABLE_MODELS[0].id)
   const [resettingAI, setResettingAI] = useState(false)
   const [confirmFullReset, setConfirmFullReset] = useState(false)
   const [fullResetting, setFullResetting] = useState(false)
@@ -120,40 +119,7 @@ export default function MainMenu({ onEnterWorld }: Props) {
         progressRef.current = progress
         setAiProgress(progress)
         setAiMessage(message)
-      }, selectedModel)
-      stopTimer()
-      setAiStatus('ready')
-      setAiReady(true)
-    } catch (e) {
-      console.error('AI init failed:', e)
-      stopTimer()
-      setAiStatus('error')
-      const raw = genesisAI.lastRawError
-        || (e instanceof Error ? `[${e.name}] ${e.message}` : String(e))
-      setAiRawError(raw)
-    }
-  }
-
-  async function initAIWithModel(modelId: ModelId) {
-    setSelectedModel(modelId)
-    genesisAI.reset()
-    setAiReady(false)
-    // небольшая задержка чтобы state обновился
-    await new Promise(r => setTimeout(r, 50))
-    setAiStatus('loading')
-    setAiProgress(0)
-    setAiMessage('')
-    setAiRawError(null)
-    setShowRawError(false)
-    progressRef.current = 0
-    stopTimer()
-    startTimer()
-    try {
-      await genesisAI.initialize((progress, message) => {
-        progressRef.current = progress
-        setAiProgress(progress)
-        setAiMessage(message)
-      }, modelId)
+      })
       stopTimer()
       setAiStatus('ready')
       setAiReady(true)
@@ -194,17 +160,13 @@ export default function MainMenu({ onEnterWorld }: Props) {
 
   function getAiErrorText(): string {
     const err = genesisAI.lastInitError
-    if (err === 'webgpu_not_supported') return 'WebGPU недоступен — попробуйте Chrome или Edge и обновите браузер'
-    if (err === 'webgpu_no_adapter')    return 'Видеокарта не найдена или не поддерживает WebGPU — нужна DirectX 12 / Vulkan совместимая GPU'
-    if (err === 'gpu_shader_error')     return 'GPU не может запустить шейдеры модели ИИ — обновите драйверы видеокарты или браузер. Иногда помогает перезапуск браузера'
-    if (err === 'network_error')        return 'Ошибка сети — проверьте интернет и нажмите «Повторить загрузку»'
-    if (err === 'cache_error')          return 'Переполнен кэш браузера — нажмите «Удалить кэш и перескачать»'
-    return 'Неизвестная ошибка ИИ — посмотрите детали ниже и попробуйте повторить'
+    if (err === 'network_error') return 'Ошибка сети — проверьте интернет и нажмите «Повторить загрузку»'
+    if (err === 'cache_error')   return 'Переполнен кэш браузера — нажмите «Удалить кэш и перескачать»'
+    return 'Ошибка загрузки ИИ — посмотрите детали ниже и попробуйте повторить'
   }
 
   function getAiErrorButtons(): 'retry_and_cache' | 'retry_only' {
-    const err = genesisAI.lastInitError
-    if (err === 'gpu_shader_error' || err === 'webgpu_not_supported' || err === 'webgpu_no_adapter') return 'retry_only'
+    if (genesisAI.lastInitError === 'network_error') return 'retry_only'
     return 'retry_and_cache'
   }
 
@@ -312,7 +274,14 @@ export default function MainMenu({ onEnterWorld }: Props) {
 
             {aiStatus === 'ready' && (
               <div className="flex items-center justify-between gap-3 flex-wrap">
-                <div className="text-xs text-emerald-400">ИИ готов — Genesis может думать</div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <div className="text-xs text-emerald-400">ИИ готов — Genesis может думать</div>
+                  {genesisAI.activeBackend === 'wasm' && (
+                    <div className="text-xs text-yellow-400 bg-yellow-900/25 border border-yellow-700/40 rounded px-1.5 py-0.5">
+                      CPU режим
+                    </div>
+                  )}
+                </div>
                 <button
                   onClick={handleResetAI}
                   disabled={resettingAI}
@@ -342,25 +311,6 @@ export default function MainMenu({ onEnterWorld }: Props) {
                         {aiRawError}
                       </div>
                     )}
-                  </div>
-                )}
-
-                {/* Выбор другой модели — показываем при GPU ошибке */}
-                {genesisAI.lastInitError === 'gpu_shader_error' && (
-                  <div className="flex flex-col gap-1.5 mt-1 border border-zinc-700/60 rounded-lg p-2.5 bg-zinc-900/40">
-                    <div className="text-xs text-zinc-400">Попробовать другую модель:</div>
-                    <div className="flex flex-col gap-1">
-                      {AVAILABLE_MODELS.filter(m => m.id !== selectedModel).map(m => (
-                        <button
-                          key={m.id}
-                          onClick={() => initAIWithModel(m.id)}
-                          className="flex items-center justify-between text-xs text-left px-2.5 py-1.5 rounded bg-zinc-800/60 hover:bg-zinc-700/60 border border-zinc-700 hover:border-zinc-500 transition-colors"
-                        >
-                          <span className="text-white/80">{m.label}</span>
-                          <span className="text-zinc-500 ml-2">{m.size} · {m.quality}</span>
-                        </button>
-                      ))}
-                    </div>
                   </div>
                 )}
 
