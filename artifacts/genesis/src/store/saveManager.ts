@@ -14,6 +14,9 @@ export interface WorldState {
   eventLog: EventEntry[]
   terrain: TerrainModification[]
   playerAbilities: string[]
+  playerItems: ItemData[]
+  playerEffects: EffectData[]
+  worldRules: WorldRule[]
   aiMemory: string
   generation: number
 }
@@ -29,6 +32,11 @@ export interface EntityData {
   health: number
   faction?: string
   generation?: number
+  traits?: string[]
+  diet?: string
+  personality?: string
+  lifecycle?: string
+  special?: string
 }
 
 export interface MechanicData {
@@ -51,6 +59,32 @@ export interface TerrainModification {
   position: [number, number]
   radius: number
   strength: number
+}
+
+export interface ItemData {
+  id: string
+  name: string
+  type: 'weapon' | 'tool' | 'artifact' | 'consumable' | 'relic'
+  description: string
+  rarity: 'common' | 'rare' | 'legendary' | 'mythic'
+  icon?: string
+}
+
+export interface EffectData {
+  id: string
+  name: string
+  type: 'buff' | 'debuff' | 'curse' | 'blessing' | 'transformation'
+  description: string
+  duration: number
+  appliedAt: number
+  color?: string
+}
+
+export interface WorldRule {
+  id: string
+  name: string
+  description: string
+  value: string | number | boolean
 }
 
 const DB_NAME = 'genesis'
@@ -132,7 +166,6 @@ class SaveManager {
     })
   }
 
-  // Удалить все миры — полностью сносим базу данных
   async deleteAllWorlds(): Promise<void> {
     return new Promise((resolve) => {
       if (this.db) {
@@ -141,8 +174,8 @@ class SaveManager {
       }
       const request = indexedDB.deleteDatabase(DB_NAME)
       request.onsuccess = () => resolve()
-      request.onerror = () => resolve()   // resolve в любом случае
-      request.onblocked = () => resolve() // resolve если заблокировано
+      request.onerror = () => resolve()
+      request.onblocked = () => resolve()
     })
   }
 
@@ -160,6 +193,9 @@ class SaveManager {
         eventLog: [],
         terrain: [],
         playerAbilities: [],
+        playerItems: [],
+        playerEffects: [],
+        worldRules: [],
         aiMemory: '',
         generation: 0,
       },
