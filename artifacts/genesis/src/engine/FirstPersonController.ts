@@ -120,11 +120,22 @@ export class FirstPersonController {
     this.velocity.addScaledVector(forward, -this.direction.z * speed)
     this.velocity.addScaledVector(right, this.direction.x * speed)
 
-    this.camera.position.x += this.velocity.x * delta
-    this.camera.position.z += this.velocity.z * delta
+    // Substep horizontal movement so each collision check never advances
+    // the player more than one player-radius in a single step.
+    // This prevents tunneling through thin walls at low FPS or high speed.
+    const moveX = this.velocity.x * delta
+    const moveZ = this.velocity.z * delta
+    const moveDist = Math.sqrt(moveX * moveX + moveZ * moveZ)
+    // Match CollisionSystem.PLAYER_RADIUS without a runtime import
+    const playerRadius = 0.45
+    const steps = moveDist > playerRadius ? Math.ceil(moveDist / playerRadius) : 1
+    const invSteps = 1 / steps
 
-    // Resolve collisions against buildings and objects (horizontal only)
-    if (resolveCollision) resolveCollision(this.camera.position)
+    for (let s = 0; s < steps; s++) {
+      this.camera.position.x += moveX * invSteps
+      this.camera.position.z += moveZ * invSteps
+      if (resolveCollision) resolveCollision(this.camera.position)
+    }
 
     this.verticalVelocity -= this.GRAVITY * delta
     this.camera.position.y += this.verticalVelocity * delta
