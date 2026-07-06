@@ -35,6 +35,8 @@ export default function MainMenu({ onEnterWorld }: Props) {
   const [aiStatus, setAiStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
   const [aiProgress, setAiProgress] = useState(0)
   const [aiMessage, setAiMessage] = useState('')
+  const [aiRawError, setAiRawError] = useState<string | null>(null)
+  const [showRawError, setShowRawError] = useState(false)
   const [resettingAI, setResettingAI] = useState(false)
   const [confirmFullReset, setConfirmFullReset] = useState(false)
   const [fullResetting, setFullResetting] = useState(false)
@@ -107,6 +109,8 @@ export default function MainMenu({ onEnterWorld }: Props) {
     setAiStatus('loading')
     setAiProgress(0)
     setAiMessage('')
+    setAiRawError(null)
+    setShowRawError(false)
     progressRef.current = 0
     stopTimer()
     startTimer()
@@ -123,6 +127,10 @@ export default function MainMenu({ onEnterWorld }: Props) {
       console.error('AI init failed:', e)
       stopTimer()
       setAiStatus('error')
+      // Сохраняем сырое сообщение ошибки для отображения
+      const raw = genesisAI.lastRawError
+        || (e instanceof Error ? `[${e.name}] ${e.message}` : String(e))
+      setAiRawError(raw)
     }
   }
 
@@ -277,8 +285,28 @@ export default function MainMenu({ onEnterWorld }: Props) {
 
             {aiStatus === 'error' && (
               <div className="flex flex-col gap-2">
+                {/* Понятное описание ошибки */}
                 <div className="text-xs text-red-400">{getAiErrorText()}</div>
-                <div className="flex gap-2 flex-wrap">
+
+                {/* Точный текст ошибки — раскрывается по кнопке */}
+                {aiRawError && (
+                  <div className="flex flex-col gap-1">
+                    <button
+                      onClick={() => setShowRawError(v => !v)}
+                      className="self-start text-xs text-zinc-500 hover:text-zinc-300 underline underline-offset-2 transition-colors"
+                    >
+                      {showRawError ? 'Скрыть детали' : 'Показать точную ошибку'}
+                    </button>
+                    {showRawError && (
+                      <div className="bg-black/60 border border-zinc-700 rounded px-2 py-1.5 text-xs font-mono text-zinc-300 break-all leading-relaxed max-h-24 overflow-y-auto select-text">
+                        {aiRawError}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Кнопки действий */}
+                <div className="flex gap-2 flex-wrap mt-1">
                   <button
                     onClick={initAI}
                     className="text-xs text-yellow-300 bg-yellow-900/30 hover:bg-yellow-800/40 border border-yellow-800/50 rounded px-3 py-1.5 transition-colors"
@@ -290,7 +318,7 @@ export default function MainMenu({ onEnterWorld }: Props) {
                     disabled={resettingAI}
                     className="text-xs text-orange-300 bg-orange-900/30 hover:bg-orange-800/40 border border-orange-800/50 rounded px-3 py-1.5 transition-colors disabled:opacity-40"
                   >
-                    {resettingAI ? 'Удаление...' : '🗑 Удалить кэш и перескачать'}
+                    {resettingAI ? 'Удаление...' : 'Удалить кэш и перескачать'}
                   </button>
                 </div>
               </div>
